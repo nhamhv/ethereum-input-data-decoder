@@ -1,41 +1,1192 @@
 (function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
-const InputDataDecoder = require('../index');
+/**
+ * JSONViewer - by Roman Makudera 2016 (c) MIT licence.
+ */
+const JSONViewer = (function() {
+  var JSONViewer = function() {
+    this._dom = {};
+    this._dom.container = document.createElement("pre");
+    this._dom.container.classList.add("json-viewer");
+  };
 
-const abiInput = document.querySelector('#abiInput');
-const dataInput = document.querySelector('#dataInput');
-const output = document.querySelector('#output');
+  /**
+   * Visualise JSON object.
+   *
+   * @param {Object|Array} json Input value
+   * @param {Number} [maxLvl] Process only to max level, where 0..n, -1 unlimited
+   * @param {Number} [colAt] Collapse at level, where 0..n, -1 unlimited
+   */
+  JSONViewer.prototype.showJSON = function(json, maxLvl, colAt) {
+    maxLvl = typeof maxLvl === "number" ? maxLvl : -1; // max level
+    colAt = typeof colAt === "number" ? colAt : -1; // collapse at
 
-function decode() {
-  output.value = ''
+    var jsonData = this._processInput(json);
+    var walkEl = this._walk(jsonData, maxLvl, colAt, 0);
 
-  const abi = JSON.parse(abiInput.value.trim());
-  const decoder = new InputDataDecoder(abi);
+    this._dom.container.innerHTML = "";
+    this._dom.container.appendChild(walkEl);
+  };
 
-  // if copied and pasted from etherscan only get data we need
-  const data = dataInput.value.trim()
-  .replace(/(?:[\s\S]*MethodID: (.*)[\s\S])?[\s\S]?\[\d\]:(.*)/gi, '$1$2')
+  /**
+   * Get container with pre object - this container is used for visualise JSON data.
+   *
+   * @return {Element}
+   */
+  JSONViewer.prototype.getContainer = function() {
+    return this._dom.container;
+  };
 
-  dataInput.value = data
+  /**
+   * Process input JSON - throws exception for unrecognized input.
+   *
+   * @param {Object|Array} json Input value
+   * @return {Object|Array}
+   */
+  JSONViewer.prototype._processInput = function(json) {
+    if (json && typeof json === "object") {
+      return json;
+    }
+    else {
+      throw "Input value is not object or array!";
+    }
+  };
 
-  const result = decoder.decodeData(data);
+  /**
+   * Recursive walk for input value.
+   *
+   * @param {Object|Array} value Input value
+   * @param {Number} maxLvl Process only to max level, where 0..n, -1 unlimited
+   * @param {Number} colAt Collapse at level, where 0..n, -1 unlimited
+   * @param {Number} lvl Current level
+   */
+  JSONViewer.prototype._walk = function(value, maxLvl, colAt, lvl) {
+    var frag = document.createDocumentFragment();
+    var isMaxLvl = maxLvl >= 0 && lvl >= maxLvl;
+    var isCollapse = colAt >= 0 && lvl >= colAt;
 
-  console.log(result)
+    switch (typeof value) {
+      case "object":
+        if (value) {
+          var isArray = Array.isArray(value);
+          var items = isArray ? value : Object.keys(value);
+
+          if (lvl === 0) {
+            // root level
+            var rootCount = this._createItemsCount(items.length);
+            // hide/show
+            var rootLink = this._createLink(isArray ? "[" : "{");
+
+            if (items.length) {
+              rootLink.addEventListener("click", function() {
+                if (isMaxLvl) return;
+
+                rootLink.classList.toggle("collapsed");
+                rootCount.classList.toggle("hide");
+
+                // main list
+                this._dom.container.querySelector("ul").classList.toggle("hide");
+              }.bind(this));
+
+              if (isCollapse) {
+                rootLink.classList.add("collapsed");
+                rootCount.classList.remove("hide");
+              }
+            }
+            else {
+              rootLink.classList.add("empty");
+            }
+
+            rootLink.appendChild(rootCount);
+            frag.appendChild(rootLink);
+          }
+
+          if (items.length && !isMaxLvl) {
+            var len = items.length - 1;
+            var ulList = document.createElement("ul");
+            ulList.setAttribute("data-level", lvl);
+            ulList.classList.add("type-" + (isArray ? "array" : "object"));
+
+            items.forEach(function(key, ind) {
+              var item = isArray ? key : value[key];
+              var li = document.createElement("li");
+
+              if (typeof item === "object") {
+                var isEmpty = false;
+
+                // null && date
+                if (!item || item instanceof Date) {
+                  li.appendChild(document.createTextNode(isArray ? "" : key + ": "));
+                  li.appendChild(this._createSimple(item ? item : null));
+                }
+                // array & object
+                else {
+                  var itemIsArray = Array.isArray(item);
+                  var itemLen = itemIsArray ? item.length : Object.keys(item).length;
+
+                  // empty
+                  if (!itemLen) {
+                    li.appendChild(document.createTextNode(key + ": " + (itemIsArray ? "[]" : "{}")));
+                  }
+                  else {
+                    // 1+ items
+                    var itemTitle = (typeof key === "string" ? key + ": " : "") + (itemIsArray ? "[" : "{");
+                    var itemLink = this._createLink(itemTitle);
+                    var itemsCount = this._createItemsCount(itemLen);
+
+                    // maxLvl - only text, no link
+                    if (maxLvl >= 0 && lvl + 1 >= maxLvl) {
+                      li.appendChild(document.createTextNode(itemTitle));
+                    }
+                    else {
+                      itemLink.appendChild(itemsCount);
+                      li.appendChild(itemLink);
+                    }
+
+                    li.appendChild(this._walk(item, maxLvl, colAt, lvl + 1));
+                    li.appendChild(document.createTextNode(itemIsArray ? "]" : "}"));
+
+                    var list = li.querySelector("ul");
+                    var itemLinkCb = function() {
+                      itemLink.classList.toggle("collapsed");
+                      itemsCount.classList.toggle("hide");
+                      list.classList.toggle("hide");
+                    };
+
+                    // hide/show
+                    itemLink.addEventListener("click", itemLinkCb);
+
+                    // collapse lower level
+                    if (colAt >= 0 && lvl + 1 >= colAt) {
+                      itemLinkCb();
+                    }
+                  }
+                }
+              }
+              // simple values
+              else {
+                // object keys with key:
+                if (!isArray) {
+                  li.appendChild(document.createTextNode(key + ": "));
+                }
+
+                // recursive
+                li.appendChild(this._walk(item, maxLvl, colAt, lvl + 1));
+              }
+
+              // add comma to the end
+              if (ind < len) {
+                li.appendChild(document.createTextNode(","));
+              }
+
+              ulList.appendChild(li);
+            }, this);
+
+            frag.appendChild(ulList);
+          }
+          else if (items.length && isMaxLvl) {
+            var itemsCount = this._createItemsCount(items.length);
+            itemsCount.classList.remove("hide");
+
+            frag.appendChild(itemsCount);
+          }
+
+          if (lvl === 0) {
+            // empty root
+            if (!items.length) {
+              var itemsCount = this._createItemsCount(0);
+              itemsCount.classList.remove("hide");
+
+              frag.appendChild(itemsCount);
+            }
+
+            // root cover
+            frag.appendChild(document.createTextNode(isArray ? "]" : "}"));
+
+            // collapse
+            if (isCollapse) {
+              frag.querySelector("ul").classList.add("hide");
+            }
+          }
+          break;
+        }
+
+      default:
+        // simple values
+        frag.appendChild(this._createSimple(value));
+        break;
+    }
+
+    return frag;
+  };
+
+  /**
+   * Create simple value (no object|array).
+   *
+   * @param  {Number|String|null|undefined|Date} value Input value
+   * @return {Element}
+   */
+  JSONViewer.prototype._createSimple = function(value) {
+    var spanEl = document.createElement("span");
+    var type = typeof value;
+    var txt = value;
+
+    if (type === "string") {
+      txt = '"' + value + '"';
+    }
+    else if (value === null) {
+      type = "null";
+      txt = "null";
+    }
+    else if (value === undefined) {
+      txt = "undefined";
+    }
+    else if (value instanceof Date) {
+      type = "date";
+      txt = value.toString();
+    }
+
+    spanEl.classList.add("type-" + type);
+    spanEl.innerHTML = txt;
+
+    return spanEl;
+  };
+
+  /**
+   * Create items count element.
+   *
+   * @param  {Number} count Items count
+   * @return {Element}
+   */
+  JSONViewer.prototype._createItemsCount = function(count) {
+    var itemsCount = document.createElement("span");
+    itemsCount.classList.add("items-ph");
+    itemsCount.classList.add("hide");
+    itemsCount.innerHTML = this._getItemsTitle(count);
+
+    return itemsCount;
+  };
+
+  /**
+   * Create clickable link.
+   *
+   * @param  {String} title Link title
+   * @return {Element}
+   */
+  JSONViewer.prototype._createLink = function(title) {
+    var linkEl = document.createElement("a");
+    linkEl.classList.add("list-link");
+    linkEl.href = "javascript:void(0)";
+    linkEl.innerHTML = title || "";
+
+    return linkEl;
+  };
+
+  /**
+   * Get correct item|s title for count.
+   *
+   * @param  {Number} count Items count
+   * @return {String}
+   */
+  JSONViewer.prototype._getItemsTitle = function(count) {
+    var itemsTxt = count > 1 || count === 0 ? "items" : "item";
+
+    return (count + " " + itemsTxt);
+  };
+
+  return JSONViewer;
+})();
+
+module.exports = JSONViewer;
+
+},{}],2:[function(require,module,exports){
+const InputDataDecoder = require('../index')
+const JSONViewer = require('./json-viewer')
+
+const abiInput = document.querySelector('#abiInput')
+const dataInput = document.querySelector('#dataInput')
+const output = document.querySelector('#output')
+const jsonEl = document.querySelector("#json")
+const contractName = document.querySelector('#contractName')
+
+const keys = {
+  abi: '_abi',
+  inputData: '_inputData',
+}
+
+function init () {
+  const data = {
+    input: '0x54ba0f27000000000000000000000000ac26c8296d823561eb2c9fb8167d8936761694b0',
+    abi: {
+      '_format': 'hh-sol-artifact-1',
+      'contractName': 'UMoonBeastNFT',
+      'sourceName': 'contracts/upgradeables/UMoonBeastNFT.sol',
+      'abi': [
+        {
+          'inputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'constructor'
+        },
+        {
+          'anonymous': false,
+          'inputs': [
+            {
+              'indexed': false,
+              'internalType': 'address',
+              'name': 'previousAdmin',
+              'type': 'address'
+            },
+            {
+              'indexed': false,
+              'internalType': 'address',
+              'name': 'newAdmin',
+              'type': 'address'
+            }
+          ],
+          'name': 'AdminChanged',
+          'type': 'event'
+        },
+        {
+          'anonymous': false,
+          'inputs': [
+            {
+              'indexed': true,
+              'internalType': 'address',
+              'name': 'owner',
+              'type': 'address'
+            },
+            {
+              'indexed': true,
+              'internalType': 'address',
+              'name': 'approved',
+              'type': 'address'
+            },
+            {
+              'indexed': true,
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'Approval',
+          'type': 'event'
+        },
+        {
+          'anonymous': false,
+          'inputs': [
+            {
+              'indexed': true,
+              'internalType': 'address',
+              'name': 'owner',
+              'type': 'address'
+            },
+            {
+              'indexed': true,
+              'internalType': 'address',
+              'name': 'operator',
+              'type': 'address'
+            },
+            {
+              'indexed': false,
+              'internalType': 'bool',
+              'name': 'approved',
+              'type': 'bool'
+            }
+          ],
+          'name': 'ApprovalForAll',
+          'type': 'event'
+        },
+        {
+          'anonymous': false,
+          'inputs': [
+            {
+              'indexed': true,
+              'internalType': 'address',
+              'name': 'beacon',
+              'type': 'address'
+            }
+          ],
+          'name': 'BeaconUpgraded',
+          'type': 'event'
+        },
+        {
+          'anonymous': false,
+          'inputs': [
+            {
+              'indexed': false,
+              'internalType': 'uint8',
+              'name': 'version',
+              'type': 'uint8'
+            }
+          ],
+          'name': 'Initialized',
+          'type': 'event'
+        },
+        {
+          'anonymous': false,
+          'inputs': [
+            {
+              'indexed': true,
+              'internalType': 'address',
+              'name': 'previousOwner',
+              'type': 'address'
+            },
+            {
+              'indexed': true,
+              'internalType': 'address',
+              'name': 'newOwner',
+              'type': 'address'
+            }
+          ],
+          'name': 'OwnershipTransferred',
+          'type': 'event'
+        },
+        {
+          'anonymous': false,
+          'inputs': [
+            {
+              'indexed': true,
+              'internalType': 'address',
+              'name': 'from',
+              'type': 'address'
+            },
+            {
+              'indexed': true,
+              'internalType': 'address',
+              'name': 'to',
+              'type': 'address'
+            },
+            {
+              'indexed': true,
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'Transfer',
+          'type': 'event'
+        },
+        {
+          'anonymous': false,
+          'inputs': [
+            {
+              'indexed': true,
+              'internalType': 'address',
+              'name': 'implementation',
+              'type': 'address'
+            }
+          ],
+          'name': 'Upgraded',
+          'type': 'event'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': '',
+              'type': 'address'
+            }
+          ],
+          'name': '_approvedOperators',
+          'outputs': [
+            {
+              'internalType': 'bool',
+              'name': '',
+              'type': 'bool'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'to',
+              'type': 'address'
+            },
+            {
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'approve',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'owner',
+              'type': 'address'
+            }
+          ],
+          'name': 'balanceOf',
+          'outputs': [
+            {
+              'internalType': 'uint256',
+              'name': '',
+              'type': 'uint256'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'burnNFT',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'getApproved',
+          'outputs': [
+            {
+              'internalType': 'address',
+              'name': '',
+              'type': 'address'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'string',
+              'name': 'name',
+              'type': 'string'
+            },
+            {
+              'internalType': 'string',
+              'name': 'symbol',
+              'type': 'string'
+            }
+          ],
+          'name': 'initialize',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'owner',
+              'type': 'address'
+            },
+            {
+              'internalType': 'address',
+              'name': 'operator',
+              'type': 'address'
+            }
+          ],
+          'name': 'isApprovedForAll',
+          'outputs': [
+            {
+              'internalType': 'bool',
+              'name': '',
+              'type': 'bool'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [],
+          'name': 'latestTokenId',
+          'outputs': [
+            {
+              'internalType': 'uint256',
+              'name': '',
+              'type': 'uint256'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'recipient',
+              'type': 'address'
+            }
+          ],
+          'name': 'mintNFT',
+          'outputs': [
+            {
+              'internalType': 'uint256',
+              'name': '',
+              'type': 'uint256'
+            }
+          ],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'recipient',
+              'type': 'address'
+            },
+            {
+              'internalType': 'string',
+              'name': '_tokenURI_',
+              'type': 'string'
+            }
+          ],
+          'name': 'mintNFT',
+          'outputs': [
+            {
+              'internalType': 'uint256',
+              'name': '',
+              'type': 'uint256'
+            }
+          ],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [],
+          'name': 'name',
+          'outputs': [
+            {
+              'internalType': 'string',
+              'name': '',
+              'type': 'string'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [],
+          'name': 'owner',
+          'outputs': [
+            {
+              'internalType': 'address',
+              'name': '',
+              'type': 'address'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'ownerOf',
+          'outputs': [
+            {
+              'internalType': 'address',
+              'name': '',
+              'type': 'address'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [],
+          'name': 'proxiableUUID',
+          'outputs': [
+            {
+              'internalType': 'bytes32',
+              'name': '',
+              'type': 'bytes32'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [],
+          'name': 'renounceOwnership',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'from',
+              'type': 'address'
+            },
+            {
+              'internalType': 'address',
+              'name': 'to',
+              'type': 'address'
+            },
+            {
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'safeTransferFrom',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'from',
+              'type': 'address'
+            },
+            {
+              'internalType': 'address',
+              'name': 'to',
+              'type': 'address'
+            },
+            {
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            },
+            {
+              'internalType': 'bytes',
+              'name': 'data',
+              'type': 'bytes'
+            }
+          ],
+          'name': 'safeTransferFrom',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'operator',
+              'type': 'address'
+            },
+            {
+              'internalType': 'bool',
+              'name': 'approved',
+              'type': 'bool'
+            }
+          ],
+          'name': 'setApprovalForAll',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'operator',
+              'type': 'address'
+            },
+            {
+              'internalType': 'bool',
+              'name': 'isApproved',
+              'type': 'bool'
+            }
+          ],
+          'name': 'setApprovedOperator',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'string',
+              'name': 'baseURI_',
+              'type': 'string'
+            }
+          ],
+          'name': 'setBaseURI',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            },
+            {
+              'internalType': 'string',
+              'name': '_tokenURI',
+              'type': 'string'
+            }
+          ],
+          'name': 'setTokenURI',
+          'outputs': [
+            {
+              'internalType': 'uint256',
+              'name': '',
+              'type': 'uint256'
+            }
+          ],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'uint256',
+              'name': 'startId',
+              'type': 'uint256'
+            },
+            {
+              'internalType': 'uint256',
+              'name': 'endId',
+              'type': 'uint256'
+            },
+            {
+              'internalType': 'string',
+              'name': 'baseURI',
+              'type': 'string'
+            }
+          ],
+          'name': 'setTokenURIByIdRange',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'uint256[]',
+              'name': 'tokenIds',
+              'type': 'uint256[]'
+            },
+            {
+              'internalType': 'string',
+              'name': 'baseURI',
+              'type': 'string'
+            }
+          ],
+          'name': 'setTokenURIs',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'bytes4',
+              'name': 'interfaceId',
+              'type': 'bytes4'
+            }
+          ],
+          'name': 'supportsInterface',
+          'outputs': [
+            {
+              'internalType': 'bool',
+              'name': '',
+              'type': 'bool'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [],
+          'name': 'symbol',
+          'outputs': [
+            {
+              'internalType': 'string',
+              'name': '',
+              'type': 'string'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'uint256',
+              'name': 'index',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'tokenByIndex',
+          'outputs': [
+            {
+              'internalType': 'uint256',
+              'name': '',
+              'type': 'uint256'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'owner',
+              'type': 'address'
+            },
+            {
+              'internalType': 'uint256',
+              'name': 'index',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'tokenOfOwnerByIndex',
+          'outputs': [
+            {
+              'internalType': 'uint256',
+              'name': '',
+              'type': 'uint256'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'tokenURI',
+          'outputs': [
+            {
+              'internalType': 'string',
+              'name': '',
+              'type': 'string'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [],
+          'name': 'totalSupply',
+          'outputs': [
+            {
+              'internalType': 'uint256',
+              'name': '',
+              'type': 'uint256'
+            }
+          ],
+          'stateMutability': 'view',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'from',
+              'type': 'address'
+            },
+            {
+              'internalType': 'address',
+              'name': 'to',
+              'type': 'address'
+            },
+            {
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            }
+          ],
+          'name': 'transferFrom',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'newOwner',
+              'type': 'address'
+            }
+          ],
+          'name': 'transferOwnership',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'newImplementation',
+              'type': 'address'
+            }
+          ],
+          'name': 'upgradeTo',
+          'outputs': [],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'address',
+              'name': 'newImplementation',
+              'type': 'address'
+            },
+            {
+              'internalType': 'bytes',
+              'name': 'data',
+              'type': 'bytes'
+            }
+          ],
+          'name': 'upgradeToAndCall',
+          'outputs': [],
+          'stateMutability': 'payable',
+          'type': 'function'
+        },
+        {
+          'inputs': [
+            {
+              'internalType': 'uint256',
+              'name': 'tokenId',
+              'type': 'uint256'
+            },
+            {
+              'internalType': 'string',
+              'name': '_tokenURI',
+              'type': 'string'
+            },
+            {
+              'internalType': 'address',
+              'name': 'receiver',
+              'type': 'address'
+            }
+          ],
+          'name': 'withdrawNFT',
+          'outputs': [
+            {
+              'internalType': 'uint256',
+              'name': '',
+              'type': 'uint256'
+            }
+          ],
+          'stateMutability': 'nonpayable',
+          'type': 'function'
+        }
+      ],
+      'bytecode': '0x60a0604052306080523480156200001557600080fd5b506200002062000026565b620000e8565b600054610100900460ff1615620000935760405162461bcd60e51b815260206004820152602760248201527f496e697469616c697a61626c653a20636f6e747261637420697320696e697469604482015266616c697a696e6760c81b606482015260840160405180910390fd5b60005460ff9081161015620000e6576000805460ff191660ff9081179091556040519081527f7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb38474024989060200160405180910390a15b565b60805161305862000120600039600081816109bc015281816109fc01528181610d6401528181610da40152610f8901526130586000f3fe6080604052600436106101f95760003560e01c806352d1902d1161010d5780638da5cb5b116100a0578063c87b56dd1161006f578063c87b56dd146105a8578063ce18da17146105c8578063e985e9c5146105e8578063eacabe1414610631578063f2fde38b1461065157600080fd5b80638da5cb5b1461053557806395d89b4114610553578063a22cb46514610568578063b88d4fde1461058857600080fd5b80636e61036f116100dc5780636e61036f146104ba57806370a08231146104eb578063715018a61461050b5780638c0e83491461052057600080fd5b806352d1902d1461044557806354ba0f271461045a57806355f804b31461047a5780636352211e1461049a57600080fd5b80632f745c591161019057806342842e0e1161015f57806342842e0e146103b25780634cd88b76146103d25780634f1ef286146103f25780634f6ccce714610405578063523f895c1461042557600080fd5b80632f745c59146103325780633659cfe6146103525780633c5a61531461037257806340c4f66f1461039257600080fd5b8063162094c4116101cc578063162094c4146102af57806318160ddd146102dd57806323b872dd146102f25780632890e0d71461031257600080fd5b806301ffc9a7146101fe57806306fdde0314610233578063081812fc14610255578063095ea7b31461028d575b600080fd5b34801561020a57600080fd5b5061021e610219366004612654565b610671565b60405190151581526020015b60405180910390f35b34801561023f57600080fd5b50610248610682565b60405161022a91906126c1565b34801561026157600080fd5b506102756102703660046126d4565b610714565b6040516001600160a01b03909116815260200161022a565b34801561029957600080fd5b506102ad6102a8366004612704565b61073b565b005b3480156102bb57600080fd5b506102cf6102ca3660046127d1565b610855565b60405190815260200161022a565b3480156102e957600080fd5b506099546102cf565b3480156102fe57600080fd5b506102ad61030d366004612818565b610870565b34801561031e57600080fd5b506102ad61032d3660046126d4565b6108a2565b34801561033e57600080fd5b506102cf61034d366004612704565b61091c565b34801561035e57600080fd5b506102ad61036d366004612854565b6109b2565b34801561037e57600080fd5b506102ad61038d36600461286f565b610a8e565b34801561039e57600080fd5b506102ad6103ad3660046128ab565b610b28565b3480156103be57600080fd5b506102ad6103cd366004612818565b610c13565b3480156103de57600080fd5b506102ad6103ed366004612942565b610c2e565b6102ad61040036600461299c565b610d5a565b34801561041157600080fd5b506102cf6104203660046126d4565b610e2a565b34801561043157600080fd5b506102ad6104403660046129d4565b610ebd565b34801561045157600080fd5b506102cf610f7c565b34801561046657600080fd5b506102cf610475366004612854565b61102f565b34801561048657600080fd5b506102ad610495366004612a1a565b6110ab565b3480156104a657600080fd5b506102756104b53660046126d4565b6110c0565b3480156104c657600080fd5b5061021e6104d5366004612854565b6101616020526000908152604090205460ff1681565b3480156104f757600080fd5b506102cf610506366004612854565b611120565b34801561051757600080fd5b506102ad6111a6565b34801561052c57600080fd5b506102cf6111ba565b34801561054157600080fd5b5060c9546001600160a01b0316610275565b34801561055f57600080fd5b506102486111cb565b34801561057457600080fd5b506102ad61058336600461286f565b6111da565b34801561059457600080fd5b506102ad6105a3366004612a4f565b6111e5565b3480156105b457600080fd5b506102486105c33660046126d4565b611217565b3480156105d457600080fd5b506102cf6105e3366004612ab7565b61138b565b3480156105f457600080fd5b5061021e610603366004612b0e565b6001600160a01b039182166000908152606a6020908152604080832093909416825291909152205460ff1690565b34801561063d57600080fd5b506102cf61064c36600461299c565b6113b4565b34801561065d57600080fd5b506102ad61066c366004612854565b611432565b600061067c826114a8565b92915050565b60606065805461069190612b41565b80601f01602080910402602001604051908101604052809291908181526020018280546106bd90612b41565b801561070a5780601f106106df5761010080835404028352916020019161070a565b820191906000526020600020905b8154815290600101906020018083116106ed57829003601f168201915b5050505050905090565b600061071f826114cd565b506000908152606960205260409020546001600160a01b031690565b6000610746826110c0565b9050806001600160a01b0316836001600160a01b0316036107b85760405162461bcd60e51b815260206004820152602160248201527f4552433732313a20617070726f76616c20746f2063757272656e74206f776e656044820152603960f91b60648201526084015b60405180910390fd5b336001600160a01b03821614806107d457506107d48133610603565b6108465760405162461bcd60e51b815260206004820152603d60248201527f4552433732313a20617070726f76652063616c6c6572206973206e6f7420746f60448201527f6b656e206f776e6572206f7220617070726f76656420666f7220616c6c00000060648201526084016107af565b610850838361152c565b505050565b600061085f61159a565b61086983836115f4565b5090919050565b61087b335b82611686565b6108975760405162461bcd60e51b81526004016107af90612b7b565b610850838383611705565b6108ab33610875565b6109105760405162461bcd60e51b815260206004820152603060248201527f4552433732314275726e61626c653a2063616c6c6572206973206e6f74206f7760448201526f1b995c881b9bdc88185c1c1c9bdd995960821b60648201526084016107af565b61091981611876565b50565b600061092783611120565b82106109895760405162461bcd60e51b815260206004820152602b60248201527f455243373231456e756d657261626c653a206f776e657220696e646578206f7560448201526a74206f6620626f756e647360a81b60648201526084016107af565b506001600160a01b03919091166000908152609760209081526040808320938352929052205490565b6001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001630036109fa5760405162461bcd60e51b81526004016107af90612bc8565b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316610a43600080516020612fdc833981519152546001600160a01b031690565b6001600160a01b031614610a695760405162461bcd60e51b81526004016107af90612c14565b610a7281611919565b6040805160008082526020820190925261091991839190611921565b610a9661159a565b6001600160a01b038216610afc5760405162461bcd60e51b815260206004820152602760248201527f4d6f6f6e42656173743a206f70657261746f7220697320746865207a65726f206044820152666164647265737360c81b60648201526084016107af565b6001600160a01b0391909116600090815261016160205260409020805460ff1916911515919091179055565b610b3061159a565b81610b875760405162461bcd60e51b815260206004820152602160248201527f4d6f6f6e42656173743a20546f6b656e494473206c69737420697320656d70746044820152607960f81b60648201526084016107af565b60005b82811015610c0d57600082610bb6868685818110610baa57610baa612c60565b90506020020135611a8c565b604051602001610bc7929190612c76565b6040516020818303038152906040529050610bfa858584818110610bed57610bed612c60565b90506020020135826115f4565b5080610c0581612ccb565b915050610b8a565b50505050565b610850838383604051806020016040528060008152506111e5565b600054610100900460ff1615808015610c4e5750600054600160ff909116105b80610c685750303b158015610c68575060005460ff166001145b610ccb5760405162461bcd60e51b815260206004820152602e60248201527f496e697469616c697a61626c653a20636f6e747261637420697320616c72656160448201526d191e481a5b9a5d1a585b1a5e995960921b60648201526084016107af565b6000805460ff191660011790558015610cee576000805461ff0019166101001790555b610cf88383611b1f565b610d00611b50565b610d08611b77565b610d10611b50565b8015610850576000805461ff0019169055604051600181527f7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb38474024989060200160405180910390a1505050565b6001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000163003610da25760405162461bcd60e51b81526004016107af90612bc8565b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316610deb600080516020612fdc833981519152546001600160a01b031690565b6001600160a01b031614610e115760405162461bcd60e51b81526004016107af90612c14565b610e1a82611919565b610e2682826001611921565b5050565b6000610e3560995490565b8210610e985760405162461bcd60e51b815260206004820152602c60248201527f455243373231456e756d657261626c653a20676c6f62616c20696e646578206f60448201526b7574206f6620626f756e647360a01b60648201526084016107af565b60998281548110610eab57610eab612c60565b90600052602060002001549050919050565b610ec561159a565b818310610f275760405162461bcd60e51b815260206004820152602a60248201527f4d6f6f6e42656173743a2053746172744944206d757374206265206c657373206044820152691d1a185b88115b99125160b21b60648201526084016107af565b825b82811015610c0d57600082610f3d83611a8c565b604051602001610f4e929190612c76565b6040516020818303038152906040529050610f6982826115f4565b5080610f7481612ccb565b915050610f29565b6000306001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000161461101c5760405162461bcd60e51b815260206004820152603860248201527f555550535570677261646561626c653a206d757374206e6f742062652063616c60448201527f6c6564207468726f7567682064656c656761746563616c6c000000000000000060648201526084016107af565b50600080516020612fdc83398151915290565b60c9546000906001600160a01b03163314806110605750336000908152610161602052604090205460ff1615156001145b61107c5760405162461bcd60e51b81526004016107af90612ce4565b61108b61015f80546001019055565b600061109761015f5490565b90506110a38382611ba6565b90505b919050565b6110b361159a565b610162610e268282612d81565b6000818152606760205260408120546001600160a01b0316806110a35760405162461bcd60e51b8152602060048201526018602482015277115490cdcc8c4e881a5b9d985b1a59081d1bdad95b88125160421b60448201526064016107af565b60006001600160a01b03821661118a5760405162461bcd60e51b815260206004820152602960248201527f4552433732313a2061646472657373207a65726f206973206e6f7420612076616044820152683634b21037bbb732b960b91b60648201526084016107af565b506001600160a01b031660009081526068602052604090205490565b6111ae61159a565b6111b86000611d3f565b565b60006111c661015f5490565b905090565b60606066805461069190612b41565b610e26338383611d91565b6111ef3383611686565b61120b5760405162461bcd60e51b81526004016107af90612b7b565b610c0d84848484611e5f565b6000818152606760205260409020546060906001600160a01b03166112965760405162461bcd60e51b815260206004820152602f60248201527f4552433732314d657461646174613a2055524920717565727920666f72206e6f60448201526e3732bc34b9ba32b73a103a37b5b2b760891b60648201526084016107af565b60008281526101606020526040812080546112b090612b41565b80601f01602080910402602001604051908101604052809291908181526020018280546112dc90612b41565b80156113295780601f106112fe57610100808354040283529160200191611329565b820191906000526020600020905b81548152906001019060200180831161130c57829003601f168201915b50505050509050600061133a611e92565b90506000815111801561134c57508151155b15611384578061135b85611a8c565b60405160200161136c929190612c76565b60405160208183030381529060405292505050919050565b5092915050565b600061139561159a565b61139f84846115f4565b6113aa338386610c13565b50825b9392505050565b60c9546000906001600160a01b03163314806113e55750336000908152610161602052604090205460ff1615156001145b6114015760405162461bcd60e51b81526004016107af90612ce4565b61141061015f80546001019055565b600061141c61015f5490565b90506114288482611ba6565b6113ad81846115f4565b61143a61159a565b6001600160a01b03811661149f5760405162461bcd60e51b815260206004820152602660248201527f4f776e61626c653a206e6577206f776e657220697320746865207a65726f206160448201526564647265737360d01b60648201526084016107af565b61091981611d3f565b60006001600160e01b0319821663780e9d6360e01b148061067c575061067c82611ea2565b6000818152606760205260409020546001600160a01b03166109195760405162461bcd60e51b8152602060048201526018602482015277115490cdcc8c4e881a5b9d985b1a59081d1bdad95b88125160421b60448201526064016107af565b600081815260696020526040902080546001600160a01b0319166001600160a01b0384169081179091558190611561826110c0565b6001600160a01b03167f8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b92560405160405180910390a45050565b60c9546001600160a01b031633146111b85760405162461bcd60e51b815260206004820181905260248201527f4f776e61626c653a2063616c6c6572206973206e6f7420746865206f776e657260448201526064016107af565b6000828152606760205260409020546001600160a01b031661166d5760405162461bcd60e51b815260206004820152602c60248201527f4552433732314d657461646174613a2055524920736574206f66206e6f6e657860448201526b34b9ba32b73a103a37b5b2b760a11b60648201526084016107af565b6000828152610160602052604090206108508282612d81565b600080611692836110c0565b9050806001600160a01b0316846001600160a01b031614806116d957506001600160a01b038082166000908152606a602090815260408083209388168352929052205460ff165b806116fd5750836001600160a01b03166116f284610714565b6001600160a01b0316145b949350505050565b826001600160a01b0316611718826110c0565b6001600160a01b03161461173e5760405162461bcd60e51b81526004016107af90612e41565b6001600160a01b0382166117a05760405162461bcd60e51b8152602060048201526024808201527f4552433732313a207472616e7366657220746f20746865207a65726f206164646044820152637265737360e01b60648201526084016107af565b6117ad8383836001611ef2565b826001600160a01b03166117c0826110c0565b6001600160a01b0316146117e65760405162461bcd60e51b81526004016107af90612e41565b600081815260696020908152604080832080546001600160a01b03199081169091556001600160a01b0387811680865260688552838620805460001901905590871680865283862080546001019055868652606790945282852080549092168417909155905184937fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef91a4505050565b6000611881826110c0565b9050611891816000846001611ef2565b61189a826110c0565b600083815260696020908152604080832080546001600160a01b03199081169091556001600160a01b0385168085526068845282852080546000190190558785526067909352818420805490911690555192935084927fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef908390a45050565b61091961159a565b7f4910fdfa16fed3260ed0e7147f7cc6da11a60208b5b9406d12a635614ffd91435460ff16156119545761085083611efe565b826001600160a01b03166352d1902d6040518163ffffffff1660e01b8152600401602060405180830381865afa9250505080156119ae575060408051601f3d908101601f191682019092526119ab91810190612e86565b60015b611a115760405162461bcd60e51b815260206004820152602e60248201527f45524331393637557067726164653a206e657720696d706c656d656e7461746960448201526d6f6e206973206e6f74205555505360901b60648201526084016107af565b600080516020612fdc8339815191528114611a805760405162461bcd60e51b815260206004820152602960248201527f45524331393637557067726164653a20756e737570706f727465642070726f786044820152681a58589b195555525160ba1b60648201526084016107af565b50610850838383611f9a565b60606000611a9983611fbf565b600101905060008167ffffffffffffffff811115611ab957611ab961272e565b6040519080825280601f01601f191660200182016040528015611ae3576020820181803683370190505b5090508181016020015b600019016f181899199a1a9b1b9c1cb0b131b232b360811b600a86061a8153600a8504945084611aed57509392505050565b600054610100900460ff16611b465760405162461bcd60e51b81526004016107af90612e9f565b610e268282612097565b600054610100900460ff166111b85760405162461bcd60e51b81526004016107af90612e9f565b600054610100900460ff16611b9e5760405162461bcd60e51b81526004016107af90612e9f565b6111b86120d7565b6001600160a01b038216611bfc5760405162461bcd60e51b815260206004820181905260248201527f4552433732313a206d696e7420746f20746865207a65726f206164647265737360448201526064016107af565b6000818152606760205260409020546001600160a01b031615611c615760405162461bcd60e51b815260206004820152601c60248201527f4552433732313a20746f6b656e20616c7265616479206d696e7465640000000060448201526064016107af565b611c6f600083836001611ef2565b6000818152606760205260409020546001600160a01b031615611cd45760405162461bcd60e51b815260206004820152601c60248201527f4552433732313a20746f6b656e20616c7265616479206d696e7465640000000060448201526064016107af565b6001600160a01b038216600081815260686020908152604080832080546001019055848352606790915280822080546001600160a01b0319168417905551839291907fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef908290a45050565b60c980546001600160a01b038381166001600160a01b0319831681179093556040519116919082907f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e090600090a35050565b816001600160a01b0316836001600160a01b031603611df25760405162461bcd60e51b815260206004820152601960248201527f4552433732313a20617070726f766520746f2063616c6c65720000000000000060448201526064016107af565b6001600160a01b038381166000818152606a6020908152604080832094871680845294825291829020805460ff191686151590811790915591519182527f17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31910160405180910390a3505050565b611e6a848484611705565b611e7684848484612107565b610c0d5760405162461bcd60e51b81526004016107af90612eea565b6060610162805461069190612b41565b60006001600160e01b031982166380ac58cd60e01b1480611ed357506001600160e01b03198216635b5e139f60e01b145b8061067c57506301ffc9a760e01b6001600160e01b031983161461067c565b610c0d84848484612208565b6001600160a01b0381163b611f6b5760405162461bcd60e51b815260206004820152602d60248201527f455243313936373a206e657720696d706c656d656e746174696f6e206973206e60448201526c1bdd08184818dbdb9d1c9858dd609a1b60648201526084016107af565b600080516020612fdc83398151915280546001600160a01b0319166001600160a01b0392909216919091179055565b611fa38361233c565b600082511180611fb05750805b1561085057610c0d838361237c565b60008072184f03e93ff9f4daa797ed6e38ed64bf6a1f0160401b8310611ffe5772184f03e93ff9f4daa797ed6e38ed64bf6a1f0160401b830492506040015b6d04ee2d6d415b85acef8100000000831061202a576d04ee2d6d415b85acef8100000000830492506020015b662386f26fc10000831061204857662386f26fc10000830492506010015b6305f5e1008310612060576305f5e100830492506008015b612710831061207457612710830492506004015b60648310612086576064830492506002015b600a83106110a35760010192915050565b600054610100900460ff166120be5760405162461bcd60e51b81526004016107af90612e9f565b60656120ca8382612d81565b5060666108508282612d81565b600054610100900460ff166120fe5760405162461bcd60e51b81526004016107af90612e9f565b6111b833611d3f565b60006001600160a01b0384163b156121fd57604051630a85bd0160e11b81526001600160a01b0385169063150b7a029061214b903390899088908890600401612f3c565b6020604051808303816000875af1925050508015612186575060408051601f3d908101601f1916820190925261218391810190612f79565b60015b6121e3573d8080156121b4576040519150601f19603f3d011682016040523d82523d6000602084013e6121b9565b606091505b5080516000036121db5760405162461bcd60e51b81526004016107af90612eea565b805181602001fd5b6001600160e01b031916630a85bd0160e11b1490506116fd565b506001949350505050565b60018111156122775760405162461bcd60e51b815260206004820152603560248201527f455243373231456e756d657261626c653a20636f6e7365637574697665207472604482015274185b9cd9995c9cc81b9bdd081cdd5c1c1bdc9d1959605a1b60648201526084016107af565b816001600160a01b0385166122d3576122ce81609980546000838152609a60205260408120829055600182018355919091527f72a152ddfb8e864297c917af52ea6c1c68aead0fee1a62673fcc7e0c94979d000155565b6122f6565b836001600160a01b0316856001600160a01b0316146122f6576122f68582612470565b6001600160a01b0384166123125761230d8161250d565b612335565b846001600160a01b0316846001600160a01b0316146123355761233584826125bc565b5050505050565b61234581611efe565b6040516001600160a01b038216907fbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b90600090a250565b60606001600160a01b0383163b6123e45760405162461bcd60e51b815260206004820152602660248201527f416464726573733a2064656c65676174652063616c6c20746f206e6f6e2d636f6044820152651b9d1c9858dd60d21b60648201526084016107af565b600080846001600160a01b0316846040516123ff9190612f96565b600060405180830381855af49150503d806000811461243a576040519150601f19603f3d011682016040523d82523d6000602084013e61243f565b606091505b50915091506124678282604051806060016040528060278152602001612ffc60279139612600565b95945050505050565b6000600161247d84611120565b6124879190612fb2565b6000838152609860205260409020549091508082146124da576001600160a01b03841660009081526097602090815260408083208584528252808320548484528184208190558352609890915290208190555b5060009182526098602090815260408084208490556001600160a01b039094168352609781528383209183525290812055565b60995460009061251f90600190612fb2565b6000838152609a60205260408120546099805493945090928490811061254757612547612c60565b90600052602060002001549050806099838154811061256857612568612c60565b6000918252602080832090910192909255828152609a909152604080822084905585825281205560998054806125a0576125a0612fc5565b6001900381819060005260206000200160009055905550505050565b60006125c783611120565b6001600160a01b039093166000908152609760209081526040808320868452825280832085905593825260989052919091209190915550565b6060831561260f5750816113ad565b6113ad83838151156126245781518083602001fd5b8060405162461bcd60e51b81526004016107af91906126c1565b6001600160e01b03198116811461091957600080fd5b60006020828403121561266657600080fd5b81356113ad8161263e565b60005b8381101561268c578181015183820152602001612674565b50506000910152565b600081518084526126ad816020860160208601612671565b601f01601f19169290920160200192915050565b6020815260006113ad6020830184612695565b6000602082840312156126e657600080fd5b5035919050565b80356001600160a01b03811681146110a657600080fd5b6000806040838503121561271757600080fd5b612720836126ed565b946020939093013593505050565b634e487b7160e01b600052604160045260246000fd5b600082601f83011261275557600080fd5b813567ffffffffffffffff808211156127705761277061272e565b604051601f8301601f19908116603f011681019082821181831017156127985761279861272e565b816040528381528660208588010111156127b157600080fd5b836020870160208301376000602085830101528094505050505092915050565b600080604083850312156127e457600080fd5b82359150602083013567ffffffffffffffff81111561280257600080fd5b61280e85828601612744565b9150509250929050565b60008060006060848603121561282d57600080fd5b612836846126ed565b9250612844602085016126ed565b9150604084013590509250925092565b60006020828403121561286657600080fd5b6113ad826126ed565b6000806040838503121561288257600080fd5b61288b836126ed565b9150602083013580151581146128a057600080fd5b809150509250929050565b6000806000604084860312156128c057600080fd5b833567ffffffffffffffff808211156128d857600080fd5b818601915086601f8301126128ec57600080fd5b8135818111156128fb57600080fd5b8760208260051b850101111561291057600080fd5b60209283019550935090850135908082111561292b57600080fd5b5061293886828701612744565b9150509250925092565b6000806040838503121561295557600080fd5b823567ffffffffffffffff8082111561296d57600080fd5b61297986838701612744565b9350602085013591508082111561298f57600080fd5b5061280e85828601612744565b600080604083850312156129af57600080fd5b6129b8836126ed565b9150602083013567ffffffffffffffff81111561280257600080fd5b6000806000606084860312156129e957600080fd5b8335925060208401359150604084013567ffffffffffffffff811115612a0e57600080fd5b61293886828701612744565b600060208284031215612a2c57600080fd5b813567ffffffffffffffff811115612a4357600080fd5b6116fd84828501612744565b60008060008060808587031215612a6557600080fd5b612a6e856126ed565b9350612a7c602086016126ed565b925060408501359150606085013567ffffffffffffffff811115612a9f57600080fd5b612aab87828801612744565b91505092959194509250565b600080600060608486031215612acc57600080fd5b83359250602084013567ffffffffffffffff811115612aea57600080fd5b612af686828701612744565b925050612b05604085016126ed565b90509250925092565b60008060408385031215612b2157600080fd5b612b2a836126ed565b9150612b38602084016126ed565b90509250929050565b600181811c90821680612b5557607f821691505b602082108103612b7557634e487b7160e01b600052602260045260246000fd5b50919050565b6020808252602d908201527f4552433732313a2063616c6c6572206973206e6f7420746f6b656e206f776e6560408201526c1c881bdc88185c1c1c9bdd9959609a1b606082015260800190565b6020808252602c908201527f46756e6374696f6e206d7573742062652063616c6c6564207468726f7567682060408201526b19195b1959d85d1958d85b1b60a21b606082015260800190565b6020808252602c908201527f46756e6374696f6e206d7573742062652063616c6c6564207468726f7567682060408201526b6163746976652070726f787960a01b606082015260800190565b634e487b7160e01b600052603260045260246000fd5b60008351612c88818460208801612671565b835190830190612c9c818360208801612671565b64173539b7b760d91b9101908152600501949350505050565b634e487b7160e01b600052601160045260246000fd5b600060018201612cdd57612cdd612cb5565b5060010190565b6020808252602f908201527f4f776e61626c653a2063616c6c6572206973206e6f7420746865206f776e657260408201526e081bdc881a5cc8185c1c1c9bdd9959608a1b606082015260800190565b601f82111561085057600081815260208120601f850160051c81016020861015612d5a5750805b601f850160051c820191505b81811015612d7957828155600101612d66565b505050505050565b815167ffffffffffffffff811115612d9b57612d9b61272e565b612daf81612da98454612b41565b84612d33565b602080601f831160018114612de45760008415612dcc5750858301515b600019600386901b1c1916600185901b178555612d79565b600085815260208120601f198616915b82811015612e1357888601518255948401946001909101908401612df4565b5085821015612e315787850151600019600388901b60f8161c191681555b5050505050600190811b01905550565b60208082526025908201527f4552433732313a207472616e736665722066726f6d20696e636f72726563742060408201526437bbb732b960d91b606082015260800190565b600060208284031215612e9857600080fd5b5051919050565b6020808252602b908201527f496e697469616c697a61626c653a20636f6e7472616374206973206e6f74206960408201526a6e697469616c697a696e6760a81b606082015260800190565b60208082526032908201527f4552433732313a207472616e7366657220746f206e6f6e20455243373231526560408201527131b2b4bb32b91034b6b83632b6b2b73a32b960711b606082015260800190565b6001600160a01b0385811682528416602082015260408101839052608060608201819052600090612f6f90830184612695565b9695505050505050565b600060208284031215612f8b57600080fd5b81516113ad8161263e565b60008251612fa8818460208701612671565b9190910192915050565b8181038181111561067c5761067c612cb5565b634e487b7160e01b600052603160045260246000fdfe360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc416464726573733a206c6f772d6c6576656c2064656c65676174652063616c6c206661696c6564a26469706673582212200eb38f4d53c4736d4104f193708cf7d5ca948183740fadad551a50a15e603e0664736f6c63430008110033',
+      'deployedBytecode': '0x6080604052600436106101f95760003560e01c806352d1902d1161010d5780638da5cb5b116100a0578063c87b56dd1161006f578063c87b56dd146105a8578063ce18da17146105c8578063e985e9c5146105e8578063eacabe1414610631578063f2fde38b1461065157600080fd5b80638da5cb5b1461053557806395d89b4114610553578063a22cb46514610568578063b88d4fde1461058857600080fd5b80636e61036f116100dc5780636e61036f146104ba57806370a08231146104eb578063715018a61461050b5780638c0e83491461052057600080fd5b806352d1902d1461044557806354ba0f271461045a57806355f804b31461047a5780636352211e1461049a57600080fd5b80632f745c591161019057806342842e0e1161015f57806342842e0e146103b25780634cd88b76146103d25780634f1ef286146103f25780634f6ccce714610405578063523f895c1461042557600080fd5b80632f745c59146103325780633659cfe6146103525780633c5a61531461037257806340c4f66f1461039257600080fd5b8063162094c4116101cc578063162094c4146102af57806318160ddd146102dd57806323b872dd146102f25780632890e0d71461031257600080fd5b806301ffc9a7146101fe57806306fdde0314610233578063081812fc14610255578063095ea7b31461028d575b600080fd5b34801561020a57600080fd5b5061021e610219366004612654565b610671565b60405190151581526020015b60405180910390f35b34801561023f57600080fd5b50610248610682565b60405161022a91906126c1565b34801561026157600080fd5b506102756102703660046126d4565b610714565b6040516001600160a01b03909116815260200161022a565b34801561029957600080fd5b506102ad6102a8366004612704565b61073b565b005b3480156102bb57600080fd5b506102cf6102ca3660046127d1565b610855565b60405190815260200161022a565b3480156102e957600080fd5b506099546102cf565b3480156102fe57600080fd5b506102ad61030d366004612818565b610870565b34801561031e57600080fd5b506102ad61032d3660046126d4565b6108a2565b34801561033e57600080fd5b506102cf61034d366004612704565b61091c565b34801561035e57600080fd5b506102ad61036d366004612854565b6109b2565b34801561037e57600080fd5b506102ad61038d36600461286f565b610a8e565b34801561039e57600080fd5b506102ad6103ad3660046128ab565b610b28565b3480156103be57600080fd5b506102ad6103cd366004612818565b610c13565b3480156103de57600080fd5b506102ad6103ed366004612942565b610c2e565b6102ad61040036600461299c565b610d5a565b34801561041157600080fd5b506102cf6104203660046126d4565b610e2a565b34801561043157600080fd5b506102ad6104403660046129d4565b610ebd565b34801561045157600080fd5b506102cf610f7c565b34801561046657600080fd5b506102cf610475366004612854565b61102f565b34801561048657600080fd5b506102ad610495366004612a1a565b6110ab565b3480156104a657600080fd5b506102756104b53660046126d4565b6110c0565b3480156104c657600080fd5b5061021e6104d5366004612854565b6101616020526000908152604090205460ff1681565b3480156104f757600080fd5b506102cf610506366004612854565b611120565b34801561051757600080fd5b506102ad6111a6565b34801561052c57600080fd5b506102cf6111ba565b34801561054157600080fd5b5060c9546001600160a01b0316610275565b34801561055f57600080fd5b506102486111cb565b34801561057457600080fd5b506102ad61058336600461286f565b6111da565b34801561059457600080fd5b506102ad6105a3366004612a4f565b6111e5565b3480156105b457600080fd5b506102486105c33660046126d4565b611217565b3480156105d457600080fd5b506102cf6105e3366004612ab7565b61138b565b3480156105f457600080fd5b5061021e610603366004612b0e565b6001600160a01b039182166000908152606a6020908152604080832093909416825291909152205460ff1690565b34801561063d57600080fd5b506102cf61064c36600461299c565b6113b4565b34801561065d57600080fd5b506102ad61066c366004612854565b611432565b600061067c826114a8565b92915050565b60606065805461069190612b41565b80601f01602080910402602001604051908101604052809291908181526020018280546106bd90612b41565b801561070a5780601f106106df5761010080835404028352916020019161070a565b820191906000526020600020905b8154815290600101906020018083116106ed57829003601f168201915b5050505050905090565b600061071f826114cd565b506000908152606960205260409020546001600160a01b031690565b6000610746826110c0565b9050806001600160a01b0316836001600160a01b0316036107b85760405162461bcd60e51b815260206004820152602160248201527f4552433732313a20617070726f76616c20746f2063757272656e74206f776e656044820152603960f91b60648201526084015b60405180910390fd5b336001600160a01b03821614806107d457506107d48133610603565b6108465760405162461bcd60e51b815260206004820152603d60248201527f4552433732313a20617070726f76652063616c6c6572206973206e6f7420746f60448201527f6b656e206f776e6572206f7220617070726f76656420666f7220616c6c00000060648201526084016107af565b610850838361152c565b505050565b600061085f61159a565b61086983836115f4565b5090919050565b61087b335b82611686565b6108975760405162461bcd60e51b81526004016107af90612b7b565b610850838383611705565b6108ab33610875565b6109105760405162461bcd60e51b815260206004820152603060248201527f4552433732314275726e61626c653a2063616c6c6572206973206e6f74206f7760448201526f1b995c881b9bdc88185c1c1c9bdd995960821b60648201526084016107af565b61091981611876565b50565b600061092783611120565b82106109895760405162461bcd60e51b815260206004820152602b60248201527f455243373231456e756d657261626c653a206f776e657220696e646578206f7560448201526a74206f6620626f756e647360a81b60648201526084016107af565b506001600160a01b03919091166000908152609760209081526040808320938352929052205490565b6001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001630036109fa5760405162461bcd60e51b81526004016107af90612bc8565b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316610a43600080516020612fdc833981519152546001600160a01b031690565b6001600160a01b031614610a695760405162461bcd60e51b81526004016107af90612c14565b610a7281611919565b6040805160008082526020820190925261091991839190611921565b610a9661159a565b6001600160a01b038216610afc5760405162461bcd60e51b815260206004820152602760248201527f4d6f6f6e42656173743a206f70657261746f7220697320746865207a65726f206044820152666164647265737360c81b60648201526084016107af565b6001600160a01b0391909116600090815261016160205260409020805460ff1916911515919091179055565b610b3061159a565b81610b875760405162461bcd60e51b815260206004820152602160248201527f4d6f6f6e42656173743a20546f6b656e494473206c69737420697320656d70746044820152607960f81b60648201526084016107af565b60005b82811015610c0d57600082610bb6868685818110610baa57610baa612c60565b90506020020135611a8c565b604051602001610bc7929190612c76565b6040516020818303038152906040529050610bfa858584818110610bed57610bed612c60565b90506020020135826115f4565b5080610c0581612ccb565b915050610b8a565b50505050565b610850838383604051806020016040528060008152506111e5565b600054610100900460ff1615808015610c4e5750600054600160ff909116105b80610c685750303b158015610c68575060005460ff166001145b610ccb5760405162461bcd60e51b815260206004820152602e60248201527f496e697469616c697a61626c653a20636f6e747261637420697320616c72656160448201526d191e481a5b9a5d1a585b1a5e995960921b60648201526084016107af565b6000805460ff191660011790558015610cee576000805461ff0019166101001790555b610cf88383611b1f565b610d00611b50565b610d08611b77565b610d10611b50565b8015610850576000805461ff0019169055604051600181527f7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb38474024989060200160405180910390a1505050565b6001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000163003610da25760405162461bcd60e51b81526004016107af90612bc8565b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316610deb600080516020612fdc833981519152546001600160a01b031690565b6001600160a01b031614610e115760405162461bcd60e51b81526004016107af90612c14565b610e1a82611919565b610e2682826001611921565b5050565b6000610e3560995490565b8210610e985760405162461bcd60e51b815260206004820152602c60248201527f455243373231456e756d657261626c653a20676c6f62616c20696e646578206f60448201526b7574206f6620626f756e647360a01b60648201526084016107af565b60998281548110610eab57610eab612c60565b90600052602060002001549050919050565b610ec561159a565b818310610f275760405162461bcd60e51b815260206004820152602a60248201527f4d6f6f6e42656173743a2053746172744944206d757374206265206c657373206044820152691d1a185b88115b99125160b21b60648201526084016107af565b825b82811015610c0d57600082610f3d83611a8c565b604051602001610f4e929190612c76565b6040516020818303038152906040529050610f6982826115f4565b5080610f7481612ccb565b915050610f29565b6000306001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000161461101c5760405162461bcd60e51b815260206004820152603860248201527f555550535570677261646561626c653a206d757374206e6f742062652063616c60448201527f6c6564207468726f7567682064656c656761746563616c6c000000000000000060648201526084016107af565b50600080516020612fdc83398151915290565b60c9546000906001600160a01b03163314806110605750336000908152610161602052604090205460ff1615156001145b61107c5760405162461bcd60e51b81526004016107af90612ce4565b61108b61015f80546001019055565b600061109761015f5490565b90506110a38382611ba6565b90505b919050565b6110b361159a565b610162610e268282612d81565b6000818152606760205260408120546001600160a01b0316806110a35760405162461bcd60e51b8152602060048201526018602482015277115490cdcc8c4e881a5b9d985b1a59081d1bdad95b88125160421b60448201526064016107af565b60006001600160a01b03821661118a5760405162461bcd60e51b815260206004820152602960248201527f4552433732313a2061646472657373207a65726f206973206e6f7420612076616044820152683634b21037bbb732b960b91b60648201526084016107af565b506001600160a01b031660009081526068602052604090205490565b6111ae61159a565b6111b86000611d3f565b565b60006111c661015f5490565b905090565b60606066805461069190612b41565b610e26338383611d91565b6111ef3383611686565b61120b5760405162461bcd60e51b81526004016107af90612b7b565b610c0d84848484611e5f565b6000818152606760205260409020546060906001600160a01b03166112965760405162461bcd60e51b815260206004820152602f60248201527f4552433732314d657461646174613a2055524920717565727920666f72206e6f60448201526e3732bc34b9ba32b73a103a37b5b2b760891b60648201526084016107af565b60008281526101606020526040812080546112b090612b41565b80601f01602080910402602001604051908101604052809291908181526020018280546112dc90612b41565b80156113295780601f106112fe57610100808354040283529160200191611329565b820191906000526020600020905b81548152906001019060200180831161130c57829003601f168201915b50505050509050600061133a611e92565b90506000815111801561134c57508151155b15611384578061135b85611a8c565b60405160200161136c929190612c76565b60405160208183030381529060405292505050919050565b5092915050565b600061139561159a565b61139f84846115f4565b6113aa338386610c13565b50825b9392505050565b60c9546000906001600160a01b03163314806113e55750336000908152610161602052604090205460ff1615156001145b6114015760405162461bcd60e51b81526004016107af90612ce4565b61141061015f80546001019055565b600061141c61015f5490565b90506114288482611ba6565b6113ad81846115f4565b61143a61159a565b6001600160a01b03811661149f5760405162461bcd60e51b815260206004820152602660248201527f4f776e61626c653a206e6577206f776e657220697320746865207a65726f206160448201526564647265737360d01b60648201526084016107af565b61091981611d3f565b60006001600160e01b0319821663780e9d6360e01b148061067c575061067c82611ea2565b6000818152606760205260409020546001600160a01b03166109195760405162461bcd60e51b8152602060048201526018602482015277115490cdcc8c4e881a5b9d985b1a59081d1bdad95b88125160421b60448201526064016107af565b600081815260696020526040902080546001600160a01b0319166001600160a01b0384169081179091558190611561826110c0565b6001600160a01b03167f8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b92560405160405180910390a45050565b60c9546001600160a01b031633146111b85760405162461bcd60e51b815260206004820181905260248201527f4f776e61626c653a2063616c6c6572206973206e6f7420746865206f776e657260448201526064016107af565b6000828152606760205260409020546001600160a01b031661166d5760405162461bcd60e51b815260206004820152602c60248201527f4552433732314d657461646174613a2055524920736574206f66206e6f6e657860448201526b34b9ba32b73a103a37b5b2b760a11b60648201526084016107af565b6000828152610160602052604090206108508282612d81565b600080611692836110c0565b9050806001600160a01b0316846001600160a01b031614806116d957506001600160a01b038082166000908152606a602090815260408083209388168352929052205460ff165b806116fd5750836001600160a01b03166116f284610714565b6001600160a01b0316145b949350505050565b826001600160a01b0316611718826110c0565b6001600160a01b03161461173e5760405162461bcd60e51b81526004016107af90612e41565b6001600160a01b0382166117a05760405162461bcd60e51b8152602060048201526024808201527f4552433732313a207472616e7366657220746f20746865207a65726f206164646044820152637265737360e01b60648201526084016107af565b6117ad8383836001611ef2565b826001600160a01b03166117c0826110c0565b6001600160a01b0316146117e65760405162461bcd60e51b81526004016107af90612e41565b600081815260696020908152604080832080546001600160a01b03199081169091556001600160a01b0387811680865260688552838620805460001901905590871680865283862080546001019055868652606790945282852080549092168417909155905184937fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef91a4505050565b6000611881826110c0565b9050611891816000846001611ef2565b61189a826110c0565b600083815260696020908152604080832080546001600160a01b03199081169091556001600160a01b0385168085526068845282852080546000190190558785526067909352818420805490911690555192935084927fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef908390a45050565b61091961159a565b7f4910fdfa16fed3260ed0e7147f7cc6da11a60208b5b9406d12a635614ffd91435460ff16156119545761085083611efe565b826001600160a01b03166352d1902d6040518163ffffffff1660e01b8152600401602060405180830381865afa9250505080156119ae575060408051601f3d908101601f191682019092526119ab91810190612e86565b60015b611a115760405162461bcd60e51b815260206004820152602e60248201527f45524331393637557067726164653a206e657720696d706c656d656e7461746960448201526d6f6e206973206e6f74205555505360901b60648201526084016107af565b600080516020612fdc8339815191528114611a805760405162461bcd60e51b815260206004820152602960248201527f45524331393637557067726164653a20756e737570706f727465642070726f786044820152681a58589b195555525160ba1b60648201526084016107af565b50610850838383611f9a565b60606000611a9983611fbf565b600101905060008167ffffffffffffffff811115611ab957611ab961272e565b6040519080825280601f01601f191660200182016040528015611ae3576020820181803683370190505b5090508181016020015b600019016f181899199a1a9b1b9c1cb0b131b232b360811b600a86061a8153600a8504945084611aed57509392505050565b600054610100900460ff16611b465760405162461bcd60e51b81526004016107af90612e9f565b610e268282612097565b600054610100900460ff166111b85760405162461bcd60e51b81526004016107af90612e9f565b600054610100900460ff16611b9e5760405162461bcd60e51b81526004016107af90612e9f565b6111b86120d7565b6001600160a01b038216611bfc5760405162461bcd60e51b815260206004820181905260248201527f4552433732313a206d696e7420746f20746865207a65726f206164647265737360448201526064016107af565b6000818152606760205260409020546001600160a01b031615611c615760405162461bcd60e51b815260206004820152601c60248201527f4552433732313a20746f6b656e20616c7265616479206d696e7465640000000060448201526064016107af565b611c6f600083836001611ef2565b6000818152606760205260409020546001600160a01b031615611cd45760405162461bcd60e51b815260206004820152601c60248201527f4552433732313a20746f6b656e20616c7265616479206d696e7465640000000060448201526064016107af565b6001600160a01b038216600081815260686020908152604080832080546001019055848352606790915280822080546001600160a01b0319168417905551839291907fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef908290a45050565b60c980546001600160a01b038381166001600160a01b0319831681179093556040519116919082907f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e090600090a35050565b816001600160a01b0316836001600160a01b031603611df25760405162461bcd60e51b815260206004820152601960248201527f4552433732313a20617070726f766520746f2063616c6c65720000000000000060448201526064016107af565b6001600160a01b038381166000818152606a6020908152604080832094871680845294825291829020805460ff191686151590811790915591519182527f17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31910160405180910390a3505050565b611e6a848484611705565b611e7684848484612107565b610c0d5760405162461bcd60e51b81526004016107af90612eea565b6060610162805461069190612b41565b60006001600160e01b031982166380ac58cd60e01b1480611ed357506001600160e01b03198216635b5e139f60e01b145b8061067c57506301ffc9a760e01b6001600160e01b031983161461067c565b610c0d84848484612208565b6001600160a01b0381163b611f6b5760405162461bcd60e51b815260206004820152602d60248201527f455243313936373a206e657720696d706c656d656e746174696f6e206973206e60448201526c1bdd08184818dbdb9d1c9858dd609a1b60648201526084016107af565b600080516020612fdc83398151915280546001600160a01b0319166001600160a01b0392909216919091179055565b611fa38361233c565b600082511180611fb05750805b1561085057610c0d838361237c565b60008072184f03e93ff9f4daa797ed6e38ed64bf6a1f0160401b8310611ffe5772184f03e93ff9f4daa797ed6e38ed64bf6a1f0160401b830492506040015b6d04ee2d6d415b85acef8100000000831061202a576d04ee2d6d415b85acef8100000000830492506020015b662386f26fc10000831061204857662386f26fc10000830492506010015b6305f5e1008310612060576305f5e100830492506008015b612710831061207457612710830492506004015b60648310612086576064830492506002015b600a83106110a35760010192915050565b600054610100900460ff166120be5760405162461bcd60e51b81526004016107af90612e9f565b60656120ca8382612d81565b5060666108508282612d81565b600054610100900460ff166120fe5760405162461bcd60e51b81526004016107af90612e9f565b6111b833611d3f565b60006001600160a01b0384163b156121fd57604051630a85bd0160e11b81526001600160a01b0385169063150b7a029061214b903390899088908890600401612f3c565b6020604051808303816000875af1925050508015612186575060408051601f3d908101601f1916820190925261218391810190612f79565b60015b6121e3573d8080156121b4576040519150601f19603f3d011682016040523d82523d6000602084013e6121b9565b606091505b5080516000036121db5760405162461bcd60e51b81526004016107af90612eea565b805181602001fd5b6001600160e01b031916630a85bd0160e11b1490506116fd565b506001949350505050565b60018111156122775760405162461bcd60e51b815260206004820152603560248201527f455243373231456e756d657261626c653a20636f6e7365637574697665207472604482015274185b9cd9995c9cc81b9bdd081cdd5c1c1bdc9d1959605a1b60648201526084016107af565b816001600160a01b0385166122d3576122ce81609980546000838152609a60205260408120829055600182018355919091527f72a152ddfb8e864297c917af52ea6c1c68aead0fee1a62673fcc7e0c94979d000155565b6122f6565b836001600160a01b0316856001600160a01b0316146122f6576122f68582612470565b6001600160a01b0384166123125761230d8161250d565b612335565b846001600160a01b0316846001600160a01b0316146123355761233584826125bc565b5050505050565b61234581611efe565b6040516001600160a01b038216907fbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b90600090a250565b60606001600160a01b0383163b6123e45760405162461bcd60e51b815260206004820152602660248201527f416464726573733a2064656c65676174652063616c6c20746f206e6f6e2d636f6044820152651b9d1c9858dd60d21b60648201526084016107af565b600080846001600160a01b0316846040516123ff9190612f96565b600060405180830381855af49150503d806000811461243a576040519150601f19603f3d011682016040523d82523d6000602084013e61243f565b606091505b50915091506124678282604051806060016040528060278152602001612ffc60279139612600565b95945050505050565b6000600161247d84611120565b6124879190612fb2565b6000838152609860205260409020549091508082146124da576001600160a01b03841660009081526097602090815260408083208584528252808320548484528184208190558352609890915290208190555b5060009182526098602090815260408084208490556001600160a01b039094168352609781528383209183525290812055565b60995460009061251f90600190612fb2565b6000838152609a60205260408120546099805493945090928490811061254757612547612c60565b90600052602060002001549050806099838154811061256857612568612c60565b6000918252602080832090910192909255828152609a909152604080822084905585825281205560998054806125a0576125a0612fc5565b6001900381819060005260206000200160009055905550505050565b60006125c783611120565b6001600160a01b039093166000908152609760209081526040808320868452825280832085905593825260989052919091209190915550565b6060831561260f5750816113ad565b6113ad83838151156126245781518083602001fd5b8060405162461bcd60e51b81526004016107af91906126c1565b6001600160e01b03198116811461091957600080fd5b60006020828403121561266657600080fd5b81356113ad8161263e565b60005b8381101561268c578181015183820152602001612674565b50506000910152565b600081518084526126ad816020860160208601612671565b601f01601f19169290920160200192915050565b6020815260006113ad6020830184612695565b6000602082840312156126e657600080fd5b5035919050565b80356001600160a01b03811681146110a657600080fd5b6000806040838503121561271757600080fd5b612720836126ed565b946020939093013593505050565b634e487b7160e01b600052604160045260246000fd5b600082601f83011261275557600080fd5b813567ffffffffffffffff808211156127705761277061272e565b604051601f8301601f19908116603f011681019082821181831017156127985761279861272e565b816040528381528660208588010111156127b157600080fd5b836020870160208301376000602085830101528094505050505092915050565b600080604083850312156127e457600080fd5b82359150602083013567ffffffffffffffff81111561280257600080fd5b61280e85828601612744565b9150509250929050565b60008060006060848603121561282d57600080fd5b612836846126ed565b9250612844602085016126ed565b9150604084013590509250925092565b60006020828403121561286657600080fd5b6113ad826126ed565b6000806040838503121561288257600080fd5b61288b836126ed565b9150602083013580151581146128a057600080fd5b809150509250929050565b6000806000604084860312156128c057600080fd5b833567ffffffffffffffff808211156128d857600080fd5b818601915086601f8301126128ec57600080fd5b8135818111156128fb57600080fd5b8760208260051b850101111561291057600080fd5b60209283019550935090850135908082111561292b57600080fd5b5061293886828701612744565b9150509250925092565b6000806040838503121561295557600080fd5b823567ffffffffffffffff8082111561296d57600080fd5b61297986838701612744565b9350602085013591508082111561298f57600080fd5b5061280e85828601612744565b600080604083850312156129af57600080fd5b6129b8836126ed565b9150602083013567ffffffffffffffff81111561280257600080fd5b6000806000606084860312156129e957600080fd5b8335925060208401359150604084013567ffffffffffffffff811115612a0e57600080fd5b61293886828701612744565b600060208284031215612a2c57600080fd5b813567ffffffffffffffff811115612a4357600080fd5b6116fd84828501612744565b60008060008060808587031215612a6557600080fd5b612a6e856126ed565b9350612a7c602086016126ed565b925060408501359150606085013567ffffffffffffffff811115612a9f57600080fd5b612aab87828801612744565b91505092959194509250565b600080600060608486031215612acc57600080fd5b83359250602084013567ffffffffffffffff811115612aea57600080fd5b612af686828701612744565b925050612b05604085016126ed565b90509250925092565b60008060408385031215612b2157600080fd5b612b2a836126ed565b9150612b38602084016126ed565b90509250929050565b600181811c90821680612b5557607f821691505b602082108103612b7557634e487b7160e01b600052602260045260246000fd5b50919050565b6020808252602d908201527f4552433732313a2063616c6c6572206973206e6f7420746f6b656e206f776e6560408201526c1c881bdc88185c1c1c9bdd9959609a1b606082015260800190565b6020808252602c908201527f46756e6374696f6e206d7573742062652063616c6c6564207468726f7567682060408201526b19195b1959d85d1958d85b1b60a21b606082015260800190565b6020808252602c908201527f46756e6374696f6e206d7573742062652063616c6c6564207468726f7567682060408201526b6163746976652070726f787960a01b606082015260800190565b634e487b7160e01b600052603260045260246000fd5b60008351612c88818460208801612671565b835190830190612c9c818360208801612671565b64173539b7b760d91b9101908152600501949350505050565b634e487b7160e01b600052601160045260246000fd5b600060018201612cdd57612cdd612cb5565b5060010190565b6020808252602f908201527f4f776e61626c653a2063616c6c6572206973206e6f7420746865206f776e657260408201526e081bdc881a5cc8185c1c1c9bdd9959608a1b606082015260800190565b601f82111561085057600081815260208120601f850160051c81016020861015612d5a5750805b601f850160051c820191505b81811015612d7957828155600101612d66565b505050505050565b815167ffffffffffffffff811115612d9b57612d9b61272e565b612daf81612da98454612b41565b84612d33565b602080601f831160018114612de45760008415612dcc5750858301515b600019600386901b1c1916600185901b178555612d79565b600085815260208120601f198616915b82811015612e1357888601518255948401946001909101908401612df4565b5085821015612e315787850151600019600388901b60f8161c191681555b5050505050600190811b01905550565b60208082526025908201527f4552433732313a207472616e736665722066726f6d20696e636f72726563742060408201526437bbb732b960d91b606082015260800190565b600060208284031215612e9857600080fd5b5051919050565b6020808252602b908201527f496e697469616c697a61626c653a20636f6e7472616374206973206e6f74206960408201526a6e697469616c697a696e6760a81b606082015260800190565b60208082526032908201527f4552433732313a207472616e7366657220746f206e6f6e20455243373231526560408201527131b2b4bb32b91034b6b83632b6b2b73a32b960711b606082015260800190565b6001600160a01b0385811682528416602082015260408101839052608060608201819052600090612f6f90830184612695565b9695505050505050565b600060208284031215612f8b57600080fd5b81516113ad8161263e565b60008251612fa8818460208701612671565b9190910192915050565b8181038181111561067c5761067c612cb5565b634e487b7160e01b600052603160045260246000fdfe360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc416464726573733a206c6f772d6c6576656c2064656c65676174652063616c6c206661696c6564a26469706673582212200eb38f4d53c4736d4104f193708cf7d5ca948183740fadad551a50a15e603e0664736f6c63430008110033',
+      'linkReferences': {},
+      'deployedLinkReferences': {}
+    }
+  }
+
+  abiInput.value = localStorage.getItem(keys.abi) || JSON.stringify(data.abi, null, 2)
+  updateAbi(abiInput.value)
+  dataInput.value = localStorage.getItem(keys.inputData) || data.input
+
+  decode()
+}
+
+function decode () {
+  let abi = JSON.parse(abiInput.value.trim())
+  if (Array.isArray(abi.abi)) {
+    abi = abi.abi
+  }
 
   try {
-    output.value = JSON.stringify(result, null, 2);
-  } catch(error) {
+
+    const decoder = new InputDataDecoder(abi)
+
+    // if copied and pasted from etherscan only get data we need
+    const data = dataInput.value.trim()
+      .replace(/(?:[\s\S]*MethodID: (.*)[\s\S])?[\s\S]?\[\d\]:(.*)/gi, '$1$2')
+
+    dataInput.value = data
+
+    const result = decoder.decodeData(data)
+
+    console.log(result)
+    jsonEl.innerHTML = ''
+
+    const jsonViewer = new JSONViewer()
+    jsonEl.appendChild(jsonViewer.getContainer());
+    jsonViewer.showJSON(result);
+  } catch (error) {
+    console.log(error)
+    jsonEl.innerHTML = 'Error: ' + error.message;
   }
 }
 
-document.querySelector('#decode')
-.addEventListener('click', function(event) {
-  event.preventDefault();
-  decode();
-});
+function updateAbi(data) {
+  contractName.innerText = ''
 
-decode();
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data)
+    } catch (e) {
+      return
+    }
+  }
 
-},{"../index":2}],2:[function(require,module,exports){
+  let abi = data
+
+  if (abi && abi.contractName) {
+    contractName.innerText = abi.contractName
+    abi = abi.abi
+  }
+
+  console.log(abi)
+
+  if (Array.isArray(abi) && abi.length) {
+    localStorage.setItem(keys.abi, JSON.stringify(data, null, 2))
+  }
+}
+
+document.querySelector('#decode').addEventListener('click', function (event) {
+  event.preventDefault()
+  decode()
+})
+
+abiInput.addEventListener('change', function (event) {
+  console.log('abiInput change', event)
+  updateAbi(event.target.value)
+  decode()
+})
+
+dataInput.addEventListener('change', function (event) {
+  console.log('dataInput change', event)
+  localStorage.setItem(keys.inputData, event.target.value)
+  decode()
+})
+
+init()
+
+},{"../index":3,"./json-viewer":1}],3:[function(require,module,exports){
 const ethers = require('ethers')
 const Buffer = require('buffer/').Buffer
 const isBuffer = require('is-buffer')
@@ -378,13 +1529,13 @@ function toHexString (byteArray) {
 
 module.exports = InputDataDecoder
 
-},{"buffer/":131,"ethers":150,"fs":129,"is-buffer":167}],3:[function(require,module,exports){
+},{"buffer/":137,"ethers":156,"fs":135,"is-buffer":173}],4:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "abi/5.5.0";
+exports.version = "abi/5.7.0";
 
-},{}],4:[function(require,module,exports){
+},{}],5:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.defaultAbiCoder = exports.AbiCoder = void 0;
@@ -409,8 +1560,6 @@ var paramTypeBytes = new RegExp(/^bytes([0-9]*)$/);
 var paramTypeNumber = new RegExp(/^(u?int)([0-9]*)$/);
 var AbiCoder = /** @class */ (function () {
     function AbiCoder(coerceFunc) {
-        var _newTarget = this.constructor;
-        logger.checkNew(_newTarget, AbiCoder);
         (0, properties_1.defineReadOnly)(this, "coerceFunc", coerceFunc || null);
     }
     AbiCoder.prototype._getCoder = function (param) {
@@ -491,7 +1640,7 @@ var AbiCoder = /** @class */ (function () {
 exports.AbiCoder = AbiCoder;
 exports.defaultAbiCoder = new AbiCoder();
 
-},{"./_version":3,"./coders/abstract-coder":5,"./coders/address":6,"./coders/array":8,"./coders/boolean":9,"./coders/bytes":10,"./coders/fixed-bytes":11,"./coders/null":12,"./coders/number":13,"./coders/string":14,"./coders/tuple":15,"./fragments":16,"@ethersproject/bytes":33,"@ethersproject/logger":57,"@ethersproject/properties":63}],5:[function(require,module,exports){
+},{"./_version":4,"./coders/abstract-coder":6,"./coders/address":7,"./coders/array":9,"./coders/boolean":10,"./coders/bytes":11,"./coders/fixed-bytes":12,"./coders/null":13,"./coders/number":14,"./coders/string":15,"./coders/tuple":16,"./fragments":17,"@ethersproject/bytes":35,"@ethersproject/logger":62,"@ethersproject/properties":68}],6:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Reader = exports.Writer = exports.Coder = exports.checkResultErrors = void 0;
@@ -665,7 +1814,7 @@ var Reader = /** @class */ (function () {
 }());
 exports.Reader = Reader;
 
-},{"../_version":3,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/logger":57,"@ethersproject/properties":63}],6:[function(require,module,exports){
+},{"../_version":4,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/logger":62,"@ethersproject/properties":68}],7:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -711,7 +1860,7 @@ var AddressCoder = /** @class */ (function (_super) {
 }(abstract_coder_1.Coder));
 exports.AddressCoder = AddressCoder;
 
-},{"./abstract-coder":5,"@ethersproject/address":24,"@ethersproject/bytes":33}],7:[function(require,module,exports){
+},{"./abstract-coder":6,"@ethersproject/address":25,"@ethersproject/bytes":35}],8:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -752,7 +1901,7 @@ var AnonymousCoder = /** @class */ (function (_super) {
 }(abstract_coder_1.Coder));
 exports.AnonymousCoder = AnonymousCoder;
 
-},{"./abstract-coder":5}],8:[function(require,module,exports){
+},{"./abstract-coder":6}],9:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -989,7 +2138,7 @@ var ArrayCoder = /** @class */ (function (_super) {
 }(abstract_coder_1.Coder));
 exports.ArrayCoder = ArrayCoder;
 
-},{"../_version":3,"./abstract-coder":5,"./anonymous":7,"@ethersproject/logger":57}],9:[function(require,module,exports){
+},{"../_version":4,"./abstract-coder":6,"./anonymous":8,"@ethersproject/logger":62}],10:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -1027,7 +2176,7 @@ var BooleanCoder = /** @class */ (function (_super) {
 }(abstract_coder_1.Coder));
 exports.BooleanCoder = BooleanCoder;
 
-},{"./abstract-coder":5}],10:[function(require,module,exports){
+},{"./abstract-coder":6}],11:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -1080,7 +2229,7 @@ var BytesCoder = /** @class */ (function (_super) {
 }(DynamicBytesCoder));
 exports.BytesCoder = BytesCoder;
 
-},{"./abstract-coder":5,"@ethersproject/bytes":33}],11:[function(require,module,exports){
+},{"./abstract-coder":6,"@ethersproject/bytes":35}],12:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -1128,7 +2277,7 @@ var FixedBytesCoder = /** @class */ (function (_super) {
 }(abstract_coder_1.Coder));
 exports.FixedBytesCoder = FixedBytesCoder;
 
-},{"./abstract-coder":5,"@ethersproject/bytes":33}],12:[function(require,module,exports){
+},{"./abstract-coder":6,"@ethersproject/bytes":35}],13:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -1170,7 +2319,7 @@ var NullCoder = /** @class */ (function (_super) {
 }(abstract_coder_1.Coder));
 exports.NullCoder = NullCoder;
 
-},{"./abstract-coder":5}],13:[function(require,module,exports){
+},{"./abstract-coder":6}],14:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -1235,7 +2384,7 @@ var NumberCoder = /** @class */ (function (_super) {
 }(abstract_coder_1.Coder));
 exports.NumberCoder = NumberCoder;
 
-},{"./abstract-coder":5,"@ethersproject/bignumber":31,"@ethersproject/constants":37}],14:[function(require,module,exports){
+},{"./abstract-coder":6,"@ethersproject/bignumber":32,"@ethersproject/constants":39}],15:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -1274,7 +2423,7 @@ var StringCoder = /** @class */ (function (_super) {
 }(bytes_1.DynamicBytesCoder));
 exports.StringCoder = StringCoder;
 
-},{"./bytes":10,"@ethersproject/strings":100}],15:[function(require,module,exports){
+},{"./bytes":11,"@ethersproject/strings":106}],16:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -1354,7 +2503,7 @@ var TupleCoder = /** @class */ (function (_super) {
 }(abstract_coder_1.Coder));
 exports.TupleCoder = TupleCoder;
 
-},{"./abstract-coder":5,"./array":8}],16:[function(require,module,exports){
+},{"./abstract-coder":6,"./array":9}],17:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -2255,7 +3404,7 @@ function splitNesting(value) {
     return result;
 }
 
-},{"./_version":3,"@ethersproject/bignumber":31,"@ethersproject/logger":57,"@ethersproject/properties":63}],17:[function(require,module,exports){
+},{"./_version":4,"@ethersproject/bignumber":32,"@ethersproject/logger":62,"@ethersproject/properties":68}],18:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TransactionDescription = exports.LogDescription = exports.checkResultErrors = exports.Indexed = exports.Interface = exports.defaultAbiCoder = exports.AbiCoder = exports.FormatTypes = exports.ParamType = exports.FunctionFragment = exports.Fragment = exports.EventFragment = exports.ErrorFragment = exports.ConstructorFragment = void 0;
@@ -2277,7 +3426,7 @@ Object.defineProperty(exports, "Interface", { enumerable: true, get: function ()
 Object.defineProperty(exports, "LogDescription", { enumerable: true, get: function () { return interface_1.LogDescription; } });
 Object.defineProperty(exports, "TransactionDescription", { enumerable: true, get: function () { return interface_1.TransactionDescription; } });
 
-},{"./abi-coder":4,"./fragments":16,"./interface":18}],18:[function(require,module,exports){
+},{"./abi-coder":5,"./fragments":17,"./interface":19}],19:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -2370,7 +3519,6 @@ var Interface = /** @class */ (function () {
     function Interface(fragments) {
         var _newTarget = this.constructor;
         var _this = this;
-        logger.checkNew(_newTarget, Interface);
         var abi = [];
         if (typeof (fragments) === "string") {
             abi = JSON.parse(fragments);
@@ -2626,6 +3774,7 @@ var Interface = /** @class */ (function () {
         }
         var bytes = (0, bytes_1.arrayify)(data);
         var reason = null;
+        var message = "";
         var errorArgs = null;
         var errorName = null;
         var errorSignature = null;
@@ -2646,6 +3795,12 @@ var Interface = /** @class */ (function () {
                     if (builtin.reason) {
                         reason = errorArgs[0];
                     }
+                    if (errorName === "Error") {
+                        message = "; VM Exception while processing transaction: reverted with reason string " + JSON.stringify(errorArgs[0]);
+                    }
+                    else if (errorName === "Panic") {
+                        message = "; VM Exception while processing transaction: reverted with panic code " + errorArgs[0];
+                    }
                 }
                 else {
                     try {
@@ -2654,15 +3809,14 @@ var Interface = /** @class */ (function () {
                         errorName = error.name;
                         errorSignature = error.format();
                     }
-                    catch (error) {
-                        console.log(error);
-                    }
+                    catch (error) { }
                 }
                 break;
             }
         }
-        return logger.throwError("call revert exception", logger_1.Logger.errors.CALL_EXCEPTION, {
+        return logger.throwError("call revert exception" + message, logger_1.Logger.errors.CALL_EXCEPTION, {
             method: functionFragment.format(),
+            data: (0, bytes_1.hexlify)(data),
             errorArgs: errorArgs,
             errorName: errorName,
             errorSignature: errorSignature,
@@ -2698,6 +3852,12 @@ var Interface = /** @class */ (function () {
             }
             else if (param.type === "bytes") {
                 return (0, keccak256_1.keccak256)((0, bytes_1.hexlify)(value));
+            }
+            if (param.type === "bool" && typeof (value) === "boolean") {
+                value = (value ? "0x01" : "0x00");
+            }
+            if (param.type.match(/^u?int/)) {
+                value = bignumber_1.BigNumber.from(value).toHexString();
             }
             // Check addresses are valid
             if (param.type === "address") {
@@ -2931,13 +4091,13 @@ var Interface = /** @class */ (function () {
 }());
 exports.Interface = Interface;
 
-},{"./_version":3,"./abi-coder":4,"./coders/abstract-coder":5,"./fragments":16,"@ethersproject/address":24,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/hash":43,"@ethersproject/keccak256":55,"@ethersproject/logger":57,"@ethersproject/properties":63}],19:[function(require,module,exports){
+},{"./_version":4,"./abi-coder":5,"./coders/abstract-coder":6,"./fragments":17,"@ethersproject/address":25,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/hash":48,"@ethersproject/keccak256":60,"@ethersproject/logger":62,"@ethersproject/properties":68}],20:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "abstract-provider/5.5.1";
+exports.version = "abstract-provider/5.7.0";
 
-},{}],20:[function(require,module,exports){
+},{}],21:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -3082,7 +4242,7 @@ var Provider = /** @class */ (function () {
     }
     Provider.prototype.getFeeData = function () {
         return __awaiter(this, void 0, void 0, function () {
-            var _a, block, gasPrice, maxFeePerGas, maxPriorityFeePerGas;
+            var _a, block, gasPrice, lastBaseFeePerGas, maxFeePerGas, maxPriorityFeePerGas;
             return __generator(this, function (_b) {
                 switch (_b.label) {
                     case 0: return [4 /*yield*/, (0, properties_1.resolveProperties)({
@@ -3095,15 +4255,16 @@ var Provider = /** @class */ (function () {
                         })];
                     case 1:
                         _a = _b.sent(), block = _a.block, gasPrice = _a.gasPrice;
-                        maxFeePerGas = null, maxPriorityFeePerGas = null;
+                        lastBaseFeePerGas = null, maxFeePerGas = null, maxPriorityFeePerGas = null;
                         if (block && block.baseFeePerGas) {
                             // We may want to compute this more accurately in the future,
                             // using the formula "check if the base fee is correct".
                             // See: https://eips.ethereum.org/EIPS/eip-1559
-                            maxPriorityFeePerGas = bignumber_1.BigNumber.from("2500000000");
+                            lastBaseFeePerGas = block.baseFeePerGas;
+                            maxPriorityFeePerGas = bignumber_1.BigNumber.from("1500000000");
                             maxFeePerGas = block.baseFeePerGas.mul(2).add(maxPriorityFeePerGas);
                         }
-                        return [2 /*return*/, { maxFeePerGas: maxFeePerGas, maxPriorityFeePerGas: maxPriorityFeePerGas, gasPrice: gasPrice }];
+                        return [2 /*return*/, { lastBaseFeePerGas: lastBaseFeePerGas, maxFeePerGas: maxFeePerGas, maxPriorityFeePerGas: maxPriorityFeePerGas, gasPrice: gasPrice }];
                 }
             });
         });
@@ -3123,13 +4284,13 @@ var Provider = /** @class */ (function () {
 }());
 exports.Provider = Provider;
 
-},{"./_version":19,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/logger":57,"@ethersproject/properties":63}],21:[function(require,module,exports){
+},{"./_version":20,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/logger":62,"@ethersproject/properties":68}],22:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "abstract-signer/5.5.0";
+exports.version = "abstract-signer/5.7.0";
 
-},{}],22:[function(require,module,exports){
+},{}],23:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -3189,7 +4350,7 @@ var logger_1 = require("@ethersproject/logger");
 var _version_1 = require("./_version");
 var logger = new logger_1.Logger(_version_1.version);
 var allowedTransactionKeys = [
-    "accessList", "chainId", "customData", "data", "from", "gasLimit", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "to", "type", "value"
+    "accessList", "ccipReadEnabled", "chainId", "customData", "data", "from", "gasLimit", "gasPrice", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "to", "type", "value"
 ];
 var forwardErrors = [
     logger_1.Logger.errors.INSUFFICIENT_FUNDS,
@@ -3538,10 +4699,7 @@ exports.Signer = Signer;
 var VoidSigner = /** @class */ (function (_super) {
     __extends(VoidSigner, _super);
     function VoidSigner(address, provider) {
-        var _newTarget = this.constructor;
-        var _this = this;
-        logger.checkNew(_newTarget, VoidSigner);
-        _this = _super.call(this) || this;
+        var _this = _super.call(this) || this;
         (0, properties_1.defineReadOnly)(_this, "address", address);
         (0, properties_1.defineReadOnly)(_this, "provider", provider || null);
         return _this;
@@ -3570,13 +4728,13 @@ var VoidSigner = /** @class */ (function (_super) {
 }(Signer));
 exports.VoidSigner = VoidSigner;
 
-},{"./_version":21,"@ethersproject/logger":57,"@ethersproject/properties":63}],23:[function(require,module,exports){
+},{"./_version":22,"@ethersproject/logger":62,"@ethersproject/properties":68}],24:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "address/5.5.0";
+exports.version = "address/5.7.0";
 
-},{}],24:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCreate2Address = exports.getContractAddress = exports.getIcapAddress = exports.isAddress = exports.getAddress = void 0;
@@ -3718,7 +4876,7 @@ function getCreate2Address(from, salt, initCodeHash) {
 }
 exports.getCreate2Address = getCreate2Address;
 
-},{"./_version":23,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/keccak256":55,"@ethersproject/logger":57,"@ethersproject/rlp":87}],25:[function(require,module,exports){
+},{"./_version":24,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/keccak256":60,"@ethersproject/logger":62,"@ethersproject/rlp":93}],26:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.encode = exports.decode = void 0;
@@ -3742,7 +4900,7 @@ function encode(data) {
 }
 exports.encode = encode;
 
-},{"@ethersproject/bytes":33}],26:[function(require,module,exports){
+},{"@ethersproject/bytes":35}],27:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.encode = exports.decode = void 0;
@@ -3750,7 +4908,7 @@ var base64_1 = require("./base64");
 Object.defineProperty(exports, "decode", { enumerable: true, get: function () { return base64_1.decode; } });
 Object.defineProperty(exports, "encode", { enumerable: true, get: function () { return base64_1.encode; } });
 
-},{"./base64":25}],27:[function(require,module,exports){
+},{"./base64":26}],28:[function(require,module,exports){
 "use strict";
 /**
  * var basex = require("base-x");
@@ -3876,13 +5034,13 @@ exports.Base58 = Base58;
 //console.log(Base58.decode("Qmd2V777o5XvJbYMeMb8k2nU5f8d3ciUQ5YpYuWhzv8iDj"))
 //console.log(Base58.encode(Base58.decode("Qmd2V777o5XvJbYMeMb8k2nU5f8d3ciUQ5YpYuWhzv8iDj")))
 
-},{"@ethersproject/bytes":33,"@ethersproject/properties":63}],28:[function(require,module,exports){
+},{"@ethersproject/bytes":35,"@ethersproject/properties":68}],29:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "bignumber/5.5.0";
+exports.version = "bignumber/5.7.0";
 
-},{}],29:[function(require,module,exports){
+},{}],30:[function(require,module,exports){
 "use strict";
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -3917,8 +5075,6 @@ exports.isBigNumberish = isBigNumberish;
 var _warnedToStringRadix = false;
 var BigNumber = /** @class */ (function () {
     function BigNumber(constructorGuard, hex) {
-        var _newTarget = this.constructor;
-        logger.checkNew(_newTarget, BigNumber);
         if (constructorGuard !== _constructorGuard) {
             logger.throwError("cannot call constructor directly; use BigNumber.from", logger_1.Logger.errors.UNSUPPORTED_OPERATION, {
                 operation: "new (BigNumber)"
@@ -3949,7 +5105,7 @@ var BigNumber = /** @class */ (function () {
     BigNumber.prototype.div = function (other) {
         var o = BigNumber.from(other);
         if (o.isZero()) {
-            throwFault("division by zero", "div");
+            throwFault("division-by-zero", "div");
         }
         return toBigNumber(toBN(this).div(toBN(other)));
     };
@@ -3959,53 +5115,53 @@ var BigNumber = /** @class */ (function () {
     BigNumber.prototype.mod = function (other) {
         var value = toBN(other);
         if (value.isNeg()) {
-            throwFault("cannot modulo negative values", "mod");
+            throwFault("division-by-zero", "mod");
         }
         return toBigNumber(toBN(this).umod(value));
     };
     BigNumber.prototype.pow = function (other) {
         var value = toBN(other);
         if (value.isNeg()) {
-            throwFault("cannot raise to negative values", "pow");
+            throwFault("negative-power", "pow");
         }
         return toBigNumber(toBN(this).pow(value));
     };
     BigNumber.prototype.and = function (other) {
         var value = toBN(other);
         if (this.isNegative() || value.isNeg()) {
-            throwFault("cannot 'and' negative values", "and");
+            throwFault("unbound-bitwise-result", "and");
         }
         return toBigNumber(toBN(this).and(value));
     };
     BigNumber.prototype.or = function (other) {
         var value = toBN(other);
         if (this.isNegative() || value.isNeg()) {
-            throwFault("cannot 'or' negative values", "or");
+            throwFault("unbound-bitwise-result", "or");
         }
         return toBigNumber(toBN(this).or(value));
     };
     BigNumber.prototype.xor = function (other) {
         var value = toBN(other);
         if (this.isNegative() || value.isNeg()) {
-            throwFault("cannot 'xor' negative values", "xor");
+            throwFault("unbound-bitwise-result", "xor");
         }
         return toBigNumber(toBN(this).xor(value));
     };
     BigNumber.prototype.mask = function (value) {
         if (this.isNegative() || value < 0) {
-            throwFault("cannot mask negative values", "mask");
+            throwFault("negative-width", "mask");
         }
         return toBigNumber(toBN(this).maskn(value));
     };
     BigNumber.prototype.shl = function (value) {
         if (this.isNegative() || value < 0) {
-            throwFault("cannot shift negative values", "shl");
+            throwFault("negative-width", "shl");
         }
         return toBigNumber(toBN(this).shln(value));
     };
     BigNumber.prototype.shr = function (value) {
         if (this.isNegative() || value < 0) {
-            throwFault("cannot shift negative values", "shr");
+            throwFault("negative-width", "shr");
         }
         return toBigNumber(toBN(this).shrn(value));
     };
@@ -4200,7 +5356,7 @@ function _base16To36(value) {
 }
 exports._base16To36 = _base16To36;
 
-},{"./_version":28,"@ethersproject/bytes":33,"@ethersproject/logger":57,"bn.js":126}],30:[function(require,module,exports){
+},{"./_version":29,"@ethersproject/bytes":35,"@ethersproject/logger":62,"bn.js":33}],31:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.FixedNumber = exports.FixedFormat = exports.parseFixed = exports.formatFixed = void 0;
@@ -4388,8 +5544,6 @@ var FixedFormat = /** @class */ (function () {
 exports.FixedFormat = FixedFormat;
 var FixedNumber = /** @class */ (function () {
     function FixedNumber(constructorGuard, hex, value, format) {
-        var _newTarget = this.constructor;
-        logger.checkNew(_newTarget, FixedNumber);
         if (constructorGuard !== _constructorGuard) {
             logger.throwError("cannot use FixedNumber constructor; use FixedNumber.from", logger_1.Logger.errors.UNSUPPORTED_OPERATION, {
                 operation: "new FixedFormat"
@@ -4572,7 +5726,7 @@ exports.FixedNumber = FixedNumber;
 var ONE = FixedNumber.from(1);
 var BUMP = FixedNumber.from("0.5");
 
-},{"./_version":28,"./bignumber":29,"@ethersproject/bytes":33,"@ethersproject/logger":57}],31:[function(require,module,exports){
+},{"./_version":29,"./bignumber":30,"@ethersproject/bytes":35,"@ethersproject/logger":62}],32:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports._base36To16 = exports._base16To36 = exports.parseFixed = exports.FixedNumber = exports.FixedFormat = exports.formatFixed = exports.BigNumber = void 0;
@@ -4588,13 +5742,3562 @@ var bignumber_2 = require("./bignumber");
 Object.defineProperty(exports, "_base16To36", { enumerable: true, get: function () { return bignumber_2._base16To36; } });
 Object.defineProperty(exports, "_base36To16", { enumerable: true, get: function () { return bignumber_2._base36To16; } });
 
-},{"./bignumber":29,"./fixednumber":30}],32:[function(require,module,exports){
+},{"./bignumber":30,"./fixednumber":31}],33:[function(require,module,exports){
+(function (module, exports) {
+  'use strict';
+
+  // Utils
+  function assert (val, msg) {
+    if (!val) throw new Error(msg || 'Assertion failed');
+  }
+
+  // Could use `inherits` module, but don't want to move from single file
+  // architecture yet.
+  function inherits (ctor, superCtor) {
+    ctor.super_ = superCtor;
+    var TempCtor = function () {};
+    TempCtor.prototype = superCtor.prototype;
+    ctor.prototype = new TempCtor();
+    ctor.prototype.constructor = ctor;
+  }
+
+  // BN
+
+  function BN (number, base, endian) {
+    if (BN.isBN(number)) {
+      return number;
+    }
+
+    this.negative = 0;
+    this.words = null;
+    this.length = 0;
+
+    // Reduction context
+    this.red = null;
+
+    if (number !== null) {
+      if (base === 'le' || base === 'be') {
+        endian = base;
+        base = 10;
+      }
+
+      this._init(number || 0, base || 10, endian || 'be');
+    }
+  }
+  if (typeof module === 'object') {
+    module.exports = BN;
+  } else {
+    exports.BN = BN;
+  }
+
+  BN.BN = BN;
+  BN.wordSize = 26;
+
+  var Buffer;
+  try {
+    if (typeof window !== 'undefined' && typeof window.Buffer !== 'undefined') {
+      Buffer = window.Buffer;
+    } else {
+      Buffer = require('buffer').Buffer;
+    }
+  } catch (e) {
+  }
+
+  BN.isBN = function isBN (num) {
+    if (num instanceof BN) {
+      return true;
+    }
+
+    return num !== null && typeof num === 'object' &&
+      num.constructor.wordSize === BN.wordSize && Array.isArray(num.words);
+  };
+
+  BN.max = function max (left, right) {
+    if (left.cmp(right) > 0) return left;
+    return right;
+  };
+
+  BN.min = function min (left, right) {
+    if (left.cmp(right) < 0) return left;
+    return right;
+  };
+
+  BN.prototype._init = function init (number, base, endian) {
+    if (typeof number === 'number') {
+      return this._initNumber(number, base, endian);
+    }
+
+    if (typeof number === 'object') {
+      return this._initArray(number, base, endian);
+    }
+
+    if (base === 'hex') {
+      base = 16;
+    }
+    assert(base === (base | 0) && base >= 2 && base <= 36);
+
+    number = number.toString().replace(/\s+/g, '');
+    var start = 0;
+    if (number[0] === '-') {
+      start++;
+      this.negative = 1;
+    }
+
+    if (start < number.length) {
+      if (base === 16) {
+        this._parseHex(number, start, endian);
+      } else {
+        this._parseBase(number, base, start);
+        if (endian === 'le') {
+          this._initArray(this.toArray(), base, endian);
+        }
+      }
+    }
+  };
+
+  BN.prototype._initNumber = function _initNumber (number, base, endian) {
+    if (number < 0) {
+      this.negative = 1;
+      number = -number;
+    }
+    if (number < 0x4000000) {
+      this.words = [number & 0x3ffffff];
+      this.length = 1;
+    } else if (number < 0x10000000000000) {
+      this.words = [
+        number & 0x3ffffff,
+        (number / 0x4000000) & 0x3ffffff
+      ];
+      this.length = 2;
+    } else {
+      assert(number < 0x20000000000000); // 2 ^ 53 (unsafe)
+      this.words = [
+        number & 0x3ffffff,
+        (number / 0x4000000) & 0x3ffffff,
+        1
+      ];
+      this.length = 3;
+    }
+
+    if (endian !== 'le') return;
+
+    // Reverse the bytes
+    this._initArray(this.toArray(), base, endian);
+  };
+
+  BN.prototype._initArray = function _initArray (number, base, endian) {
+    // Perhaps a Uint8Array
+    assert(typeof number.length === 'number');
+    if (number.length <= 0) {
+      this.words = [0];
+      this.length = 1;
+      return this;
+    }
+
+    this.length = Math.ceil(number.length / 3);
+    this.words = new Array(this.length);
+    for (var i = 0; i < this.length; i++) {
+      this.words[i] = 0;
+    }
+
+    var j, w;
+    var off = 0;
+    if (endian === 'be') {
+      for (i = number.length - 1, j = 0; i >= 0; i -= 3) {
+        w = number[i] | (number[i - 1] << 8) | (number[i - 2] << 16);
+        this.words[j] |= (w << off) & 0x3ffffff;
+        this.words[j + 1] = (w >>> (26 - off)) & 0x3ffffff;
+        off += 24;
+        if (off >= 26) {
+          off -= 26;
+          j++;
+        }
+      }
+    } else if (endian === 'le') {
+      for (i = 0, j = 0; i < number.length; i += 3) {
+        w = number[i] | (number[i + 1] << 8) | (number[i + 2] << 16);
+        this.words[j] |= (w << off) & 0x3ffffff;
+        this.words[j + 1] = (w >>> (26 - off)) & 0x3ffffff;
+        off += 24;
+        if (off >= 26) {
+          off -= 26;
+          j++;
+        }
+      }
+    }
+    return this._strip();
+  };
+
+  function parseHex4Bits (string, index) {
+    var c = string.charCodeAt(index);
+    // '0' - '9'
+    if (c >= 48 && c <= 57) {
+      return c - 48;
+    // 'A' - 'F'
+    } else if (c >= 65 && c <= 70) {
+      return c - 55;
+    // 'a' - 'f'
+    } else if (c >= 97 && c <= 102) {
+      return c - 87;
+    } else {
+      assert(false, 'Invalid character in ' + string);
+    }
+  }
+
+  function parseHexByte (string, lowerBound, index) {
+    var r = parseHex4Bits(string, index);
+    if (index - 1 >= lowerBound) {
+      r |= parseHex4Bits(string, index - 1) << 4;
+    }
+    return r;
+  }
+
+  BN.prototype._parseHex = function _parseHex (number, start, endian) {
+    // Create possibly bigger array to ensure that it fits the number
+    this.length = Math.ceil((number.length - start) / 6);
+    this.words = new Array(this.length);
+    for (var i = 0; i < this.length; i++) {
+      this.words[i] = 0;
+    }
+
+    // 24-bits chunks
+    var off = 0;
+    var j = 0;
+
+    var w;
+    if (endian === 'be') {
+      for (i = number.length - 1; i >= start; i -= 2) {
+        w = parseHexByte(number, start, i) << off;
+        this.words[j] |= w & 0x3ffffff;
+        if (off >= 18) {
+          off -= 18;
+          j += 1;
+          this.words[j] |= w >>> 26;
+        } else {
+          off += 8;
+        }
+      }
+    } else {
+      var parseLength = number.length - start;
+      for (i = parseLength % 2 === 0 ? start + 1 : start; i < number.length; i += 2) {
+        w = parseHexByte(number, start, i) << off;
+        this.words[j] |= w & 0x3ffffff;
+        if (off >= 18) {
+          off -= 18;
+          j += 1;
+          this.words[j] |= w >>> 26;
+        } else {
+          off += 8;
+        }
+      }
+    }
+
+    this._strip();
+  };
+
+  function parseBase (str, start, end, mul) {
+    var r = 0;
+    var b = 0;
+    var len = Math.min(str.length, end);
+    for (var i = start; i < len; i++) {
+      var c = str.charCodeAt(i) - 48;
+
+      r *= mul;
+
+      // 'a'
+      if (c >= 49) {
+        b = c - 49 + 0xa;
+
+      // 'A'
+      } else if (c >= 17) {
+        b = c - 17 + 0xa;
+
+      // '0' - '9'
+      } else {
+        b = c;
+      }
+      assert(c >= 0 && b < mul, 'Invalid character');
+      r += b;
+    }
+    return r;
+  }
+
+  BN.prototype._parseBase = function _parseBase (number, base, start) {
+    // Initialize as zero
+    this.words = [0];
+    this.length = 1;
+
+    // Find length of limb in base
+    for (var limbLen = 0, limbPow = 1; limbPow <= 0x3ffffff; limbPow *= base) {
+      limbLen++;
+    }
+    limbLen--;
+    limbPow = (limbPow / base) | 0;
+
+    var total = number.length - start;
+    var mod = total % limbLen;
+    var end = Math.min(total, total - mod) + start;
+
+    var word = 0;
+    for (var i = start; i < end; i += limbLen) {
+      word = parseBase(number, i, i + limbLen, base);
+
+      this.imuln(limbPow);
+      if (this.words[0] + word < 0x4000000) {
+        this.words[0] += word;
+      } else {
+        this._iaddn(word);
+      }
+    }
+
+    if (mod !== 0) {
+      var pow = 1;
+      word = parseBase(number, i, number.length, base);
+
+      for (i = 0; i < mod; i++) {
+        pow *= base;
+      }
+
+      this.imuln(pow);
+      if (this.words[0] + word < 0x4000000) {
+        this.words[0] += word;
+      } else {
+        this._iaddn(word);
+      }
+    }
+
+    this._strip();
+  };
+
+  BN.prototype.copy = function copy (dest) {
+    dest.words = new Array(this.length);
+    for (var i = 0; i < this.length; i++) {
+      dest.words[i] = this.words[i];
+    }
+    dest.length = this.length;
+    dest.negative = this.negative;
+    dest.red = this.red;
+  };
+
+  function move (dest, src) {
+    dest.words = src.words;
+    dest.length = src.length;
+    dest.negative = src.negative;
+    dest.red = src.red;
+  }
+
+  BN.prototype._move = function _move (dest) {
+    move(dest, this);
+  };
+
+  BN.prototype.clone = function clone () {
+    var r = new BN(null);
+    this.copy(r);
+    return r;
+  };
+
+  BN.prototype._expand = function _expand (size) {
+    while (this.length < size) {
+      this.words[this.length++] = 0;
+    }
+    return this;
+  };
+
+  // Remove leading `0` from `this`
+  BN.prototype._strip = function strip () {
+    while (this.length > 1 && this.words[this.length - 1] === 0) {
+      this.length--;
+    }
+    return this._normSign();
+  };
+
+  BN.prototype._normSign = function _normSign () {
+    // -0 = 0
+    if (this.length === 1 && this.words[0] === 0) {
+      this.negative = 0;
+    }
+    return this;
+  };
+
+  // Check Symbol.for because not everywhere where Symbol defined
+  // See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol#Browser_compatibility
+  if (typeof Symbol !== 'undefined' && typeof Symbol.for === 'function') {
+    try {
+      BN.prototype[Symbol.for('nodejs.util.inspect.custom')] = inspect;
+    } catch (e) {
+      BN.prototype.inspect = inspect;
+    }
+  } else {
+    BN.prototype.inspect = inspect;
+  }
+
+  function inspect () {
+    return (this.red ? '<BN-R: ' : '<BN: ') + this.toString(16) + '>';
+  }
+
+  /*
+
+  var zeros = [];
+  var groupSizes = [];
+  var groupBases = [];
+
+  var s = '';
+  var i = -1;
+  while (++i < BN.wordSize) {
+    zeros[i] = s;
+    s += '0';
+  }
+  groupSizes[0] = 0;
+  groupSizes[1] = 0;
+  groupBases[0] = 0;
+  groupBases[1] = 0;
+  var base = 2 - 1;
+  while (++base < 36 + 1) {
+    var groupSize = 0;
+    var groupBase = 1;
+    while (groupBase < (1 << BN.wordSize) / base) {
+      groupBase *= base;
+      groupSize += 1;
+    }
+    groupSizes[base] = groupSize;
+    groupBases[base] = groupBase;
+  }
+
+  */
+
+  var zeros = [
+    '',
+    '0',
+    '00',
+    '000',
+    '0000',
+    '00000',
+    '000000',
+    '0000000',
+    '00000000',
+    '000000000',
+    '0000000000',
+    '00000000000',
+    '000000000000',
+    '0000000000000',
+    '00000000000000',
+    '000000000000000',
+    '0000000000000000',
+    '00000000000000000',
+    '000000000000000000',
+    '0000000000000000000',
+    '00000000000000000000',
+    '000000000000000000000',
+    '0000000000000000000000',
+    '00000000000000000000000',
+    '000000000000000000000000',
+    '0000000000000000000000000'
+  ];
+
+  var groupSizes = [
+    0, 0,
+    25, 16, 12, 11, 10, 9, 8,
+    8, 7, 7, 7, 7, 6, 6,
+    6, 6, 6, 6, 6, 5, 5,
+    5, 5, 5, 5, 5, 5, 5,
+    5, 5, 5, 5, 5, 5, 5
+  ];
+
+  var groupBases = [
+    0, 0,
+    33554432, 43046721, 16777216, 48828125, 60466176, 40353607, 16777216,
+    43046721, 10000000, 19487171, 35831808, 62748517, 7529536, 11390625,
+    16777216, 24137569, 34012224, 47045881, 64000000, 4084101, 5153632,
+    6436343, 7962624, 9765625, 11881376, 14348907, 17210368, 20511149,
+    24300000, 28629151, 33554432, 39135393, 45435424, 52521875, 60466176
+  ];
+
+  BN.prototype.toString = function toString (base, padding) {
+    base = base || 10;
+    padding = padding | 0 || 1;
+
+    var out;
+    if (base === 16 || base === 'hex') {
+      out = '';
+      var off = 0;
+      var carry = 0;
+      for (var i = 0; i < this.length; i++) {
+        var w = this.words[i];
+        var word = (((w << off) | carry) & 0xffffff).toString(16);
+        carry = (w >>> (24 - off)) & 0xffffff;
+        off += 2;
+        if (off >= 26) {
+          off -= 26;
+          i--;
+        }
+        if (carry !== 0 || i !== this.length - 1) {
+          out = zeros[6 - word.length] + word + out;
+        } else {
+          out = word + out;
+        }
+      }
+      if (carry !== 0) {
+        out = carry.toString(16) + out;
+      }
+      while (out.length % padding !== 0) {
+        out = '0' + out;
+      }
+      if (this.negative !== 0) {
+        out = '-' + out;
+      }
+      return out;
+    }
+
+    if (base === (base | 0) && base >= 2 && base <= 36) {
+      // var groupSize = Math.floor(BN.wordSize * Math.LN2 / Math.log(base));
+      var groupSize = groupSizes[base];
+      // var groupBase = Math.pow(base, groupSize);
+      var groupBase = groupBases[base];
+      out = '';
+      var c = this.clone();
+      c.negative = 0;
+      while (!c.isZero()) {
+        var r = c.modrn(groupBase).toString(base);
+        c = c.idivn(groupBase);
+
+        if (!c.isZero()) {
+          out = zeros[groupSize - r.length] + r + out;
+        } else {
+          out = r + out;
+        }
+      }
+      if (this.isZero()) {
+        out = '0' + out;
+      }
+      while (out.length % padding !== 0) {
+        out = '0' + out;
+      }
+      if (this.negative !== 0) {
+        out = '-' + out;
+      }
+      return out;
+    }
+
+    assert(false, 'Base should be between 2 and 36');
+  };
+
+  BN.prototype.toNumber = function toNumber () {
+    var ret = this.words[0];
+    if (this.length === 2) {
+      ret += this.words[1] * 0x4000000;
+    } else if (this.length === 3 && this.words[2] === 0x01) {
+      // NOTE: at this stage it is known that the top bit is set
+      ret += 0x10000000000000 + (this.words[1] * 0x4000000);
+    } else if (this.length > 2) {
+      assert(false, 'Number can only safely store up to 53 bits');
+    }
+    return (this.negative !== 0) ? -ret : ret;
+  };
+
+  BN.prototype.toJSON = function toJSON () {
+    return this.toString(16, 2);
+  };
+
+  if (Buffer) {
+    BN.prototype.toBuffer = function toBuffer (endian, length) {
+      return this.toArrayLike(Buffer, endian, length);
+    };
+  }
+
+  BN.prototype.toArray = function toArray (endian, length) {
+    return this.toArrayLike(Array, endian, length);
+  };
+
+  var allocate = function allocate (ArrayType, size) {
+    if (ArrayType.allocUnsafe) {
+      return ArrayType.allocUnsafe(size);
+    }
+    return new ArrayType(size);
+  };
+
+  BN.prototype.toArrayLike = function toArrayLike (ArrayType, endian, length) {
+    this._strip();
+
+    var byteLength = this.byteLength();
+    var reqLength = length || Math.max(1, byteLength);
+    assert(byteLength <= reqLength, 'byte array longer than desired length');
+    assert(reqLength > 0, 'Requested array length <= 0');
+
+    var res = allocate(ArrayType, reqLength);
+    var postfix = endian === 'le' ? 'LE' : 'BE';
+    this['_toArrayLike' + postfix](res, byteLength);
+    return res;
+  };
+
+  BN.prototype._toArrayLikeLE = function _toArrayLikeLE (res, byteLength) {
+    var position = 0;
+    var carry = 0;
+
+    for (var i = 0, shift = 0; i < this.length; i++) {
+      var word = (this.words[i] << shift) | carry;
+
+      res[position++] = word & 0xff;
+      if (position < res.length) {
+        res[position++] = (word >> 8) & 0xff;
+      }
+      if (position < res.length) {
+        res[position++] = (word >> 16) & 0xff;
+      }
+
+      if (shift === 6) {
+        if (position < res.length) {
+          res[position++] = (word >> 24) & 0xff;
+        }
+        carry = 0;
+        shift = 0;
+      } else {
+        carry = word >>> 24;
+        shift += 2;
+      }
+    }
+
+    if (position < res.length) {
+      res[position++] = carry;
+
+      while (position < res.length) {
+        res[position++] = 0;
+      }
+    }
+  };
+
+  BN.prototype._toArrayLikeBE = function _toArrayLikeBE (res, byteLength) {
+    var position = res.length - 1;
+    var carry = 0;
+
+    for (var i = 0, shift = 0; i < this.length; i++) {
+      var word = (this.words[i] << shift) | carry;
+
+      res[position--] = word & 0xff;
+      if (position >= 0) {
+        res[position--] = (word >> 8) & 0xff;
+      }
+      if (position >= 0) {
+        res[position--] = (word >> 16) & 0xff;
+      }
+
+      if (shift === 6) {
+        if (position >= 0) {
+          res[position--] = (word >> 24) & 0xff;
+        }
+        carry = 0;
+        shift = 0;
+      } else {
+        carry = word >>> 24;
+        shift += 2;
+      }
+    }
+
+    if (position >= 0) {
+      res[position--] = carry;
+
+      while (position >= 0) {
+        res[position--] = 0;
+      }
+    }
+  };
+
+  if (Math.clz32) {
+    BN.prototype._countBits = function _countBits (w) {
+      return 32 - Math.clz32(w);
+    };
+  } else {
+    BN.prototype._countBits = function _countBits (w) {
+      var t = w;
+      var r = 0;
+      if (t >= 0x1000) {
+        r += 13;
+        t >>>= 13;
+      }
+      if (t >= 0x40) {
+        r += 7;
+        t >>>= 7;
+      }
+      if (t >= 0x8) {
+        r += 4;
+        t >>>= 4;
+      }
+      if (t >= 0x02) {
+        r += 2;
+        t >>>= 2;
+      }
+      return r + t;
+    };
+  }
+
+  BN.prototype._zeroBits = function _zeroBits (w) {
+    // Short-cut
+    if (w === 0) return 26;
+
+    var t = w;
+    var r = 0;
+    if ((t & 0x1fff) === 0) {
+      r += 13;
+      t >>>= 13;
+    }
+    if ((t & 0x7f) === 0) {
+      r += 7;
+      t >>>= 7;
+    }
+    if ((t & 0xf) === 0) {
+      r += 4;
+      t >>>= 4;
+    }
+    if ((t & 0x3) === 0) {
+      r += 2;
+      t >>>= 2;
+    }
+    if ((t & 0x1) === 0) {
+      r++;
+    }
+    return r;
+  };
+
+  // Return number of used bits in a BN
+  BN.prototype.bitLength = function bitLength () {
+    var w = this.words[this.length - 1];
+    var hi = this._countBits(w);
+    return (this.length - 1) * 26 + hi;
+  };
+
+  function toBitArray (num) {
+    var w = new Array(num.bitLength());
+
+    for (var bit = 0; bit < w.length; bit++) {
+      var off = (bit / 26) | 0;
+      var wbit = bit % 26;
+
+      w[bit] = (num.words[off] >>> wbit) & 0x01;
+    }
+
+    return w;
+  }
+
+  // Number of trailing zero bits
+  BN.prototype.zeroBits = function zeroBits () {
+    if (this.isZero()) return 0;
+
+    var r = 0;
+    for (var i = 0; i < this.length; i++) {
+      var b = this._zeroBits(this.words[i]);
+      r += b;
+      if (b !== 26) break;
+    }
+    return r;
+  };
+
+  BN.prototype.byteLength = function byteLength () {
+    return Math.ceil(this.bitLength() / 8);
+  };
+
+  BN.prototype.toTwos = function toTwos (width) {
+    if (this.negative !== 0) {
+      return this.abs().inotn(width).iaddn(1);
+    }
+    return this.clone();
+  };
+
+  BN.prototype.fromTwos = function fromTwos (width) {
+    if (this.testn(width - 1)) {
+      return this.notn(width).iaddn(1).ineg();
+    }
+    return this.clone();
+  };
+
+  BN.prototype.isNeg = function isNeg () {
+    return this.negative !== 0;
+  };
+
+  // Return negative clone of `this`
+  BN.prototype.neg = function neg () {
+    return this.clone().ineg();
+  };
+
+  BN.prototype.ineg = function ineg () {
+    if (!this.isZero()) {
+      this.negative ^= 1;
+    }
+
+    return this;
+  };
+
+  // Or `num` with `this` in-place
+  BN.prototype.iuor = function iuor (num) {
+    while (this.length < num.length) {
+      this.words[this.length++] = 0;
+    }
+
+    for (var i = 0; i < num.length; i++) {
+      this.words[i] = this.words[i] | num.words[i];
+    }
+
+    return this._strip();
+  };
+
+  BN.prototype.ior = function ior (num) {
+    assert((this.negative | num.negative) === 0);
+    return this.iuor(num);
+  };
+
+  // Or `num` with `this`
+  BN.prototype.or = function or (num) {
+    if (this.length > num.length) return this.clone().ior(num);
+    return num.clone().ior(this);
+  };
+
+  BN.prototype.uor = function uor (num) {
+    if (this.length > num.length) return this.clone().iuor(num);
+    return num.clone().iuor(this);
+  };
+
+  // And `num` with `this` in-place
+  BN.prototype.iuand = function iuand (num) {
+    // b = min-length(num, this)
+    var b;
+    if (this.length > num.length) {
+      b = num;
+    } else {
+      b = this;
+    }
+
+    for (var i = 0; i < b.length; i++) {
+      this.words[i] = this.words[i] & num.words[i];
+    }
+
+    this.length = b.length;
+
+    return this._strip();
+  };
+
+  BN.prototype.iand = function iand (num) {
+    assert((this.negative | num.negative) === 0);
+    return this.iuand(num);
+  };
+
+  // And `num` with `this`
+  BN.prototype.and = function and (num) {
+    if (this.length > num.length) return this.clone().iand(num);
+    return num.clone().iand(this);
+  };
+
+  BN.prototype.uand = function uand (num) {
+    if (this.length > num.length) return this.clone().iuand(num);
+    return num.clone().iuand(this);
+  };
+
+  // Xor `num` with `this` in-place
+  BN.prototype.iuxor = function iuxor (num) {
+    // a.length > b.length
+    var a;
+    var b;
+    if (this.length > num.length) {
+      a = this;
+      b = num;
+    } else {
+      a = num;
+      b = this;
+    }
+
+    for (var i = 0; i < b.length; i++) {
+      this.words[i] = a.words[i] ^ b.words[i];
+    }
+
+    if (this !== a) {
+      for (; i < a.length; i++) {
+        this.words[i] = a.words[i];
+      }
+    }
+
+    this.length = a.length;
+
+    return this._strip();
+  };
+
+  BN.prototype.ixor = function ixor (num) {
+    assert((this.negative | num.negative) === 0);
+    return this.iuxor(num);
+  };
+
+  // Xor `num` with `this`
+  BN.prototype.xor = function xor (num) {
+    if (this.length > num.length) return this.clone().ixor(num);
+    return num.clone().ixor(this);
+  };
+
+  BN.prototype.uxor = function uxor (num) {
+    if (this.length > num.length) return this.clone().iuxor(num);
+    return num.clone().iuxor(this);
+  };
+
+  // Not ``this`` with ``width`` bitwidth
+  BN.prototype.inotn = function inotn (width) {
+    assert(typeof width === 'number' && width >= 0);
+
+    var bytesNeeded = Math.ceil(width / 26) | 0;
+    var bitsLeft = width % 26;
+
+    // Extend the buffer with leading zeroes
+    this._expand(bytesNeeded);
+
+    if (bitsLeft > 0) {
+      bytesNeeded--;
+    }
+
+    // Handle complete words
+    for (var i = 0; i < bytesNeeded; i++) {
+      this.words[i] = ~this.words[i] & 0x3ffffff;
+    }
+
+    // Handle the residue
+    if (bitsLeft > 0) {
+      this.words[i] = ~this.words[i] & (0x3ffffff >> (26 - bitsLeft));
+    }
+
+    // And remove leading zeroes
+    return this._strip();
+  };
+
+  BN.prototype.notn = function notn (width) {
+    return this.clone().inotn(width);
+  };
+
+  // Set `bit` of `this`
+  BN.prototype.setn = function setn (bit, val) {
+    assert(typeof bit === 'number' && bit >= 0);
+
+    var off = (bit / 26) | 0;
+    var wbit = bit % 26;
+
+    this._expand(off + 1);
+
+    if (val) {
+      this.words[off] = this.words[off] | (1 << wbit);
+    } else {
+      this.words[off] = this.words[off] & ~(1 << wbit);
+    }
+
+    return this._strip();
+  };
+
+  // Add `num` to `this` in-place
+  BN.prototype.iadd = function iadd (num) {
+    var r;
+
+    // negative + positive
+    if (this.negative !== 0 && num.negative === 0) {
+      this.negative = 0;
+      r = this.isub(num);
+      this.negative ^= 1;
+      return this._normSign();
+
+    // positive + negative
+    } else if (this.negative === 0 && num.negative !== 0) {
+      num.negative = 0;
+      r = this.isub(num);
+      num.negative = 1;
+      return r._normSign();
+    }
+
+    // a.length > b.length
+    var a, b;
+    if (this.length > num.length) {
+      a = this;
+      b = num;
+    } else {
+      a = num;
+      b = this;
+    }
+
+    var carry = 0;
+    for (var i = 0; i < b.length; i++) {
+      r = (a.words[i] | 0) + (b.words[i] | 0) + carry;
+      this.words[i] = r & 0x3ffffff;
+      carry = r >>> 26;
+    }
+    for (; carry !== 0 && i < a.length; i++) {
+      r = (a.words[i] | 0) + carry;
+      this.words[i] = r & 0x3ffffff;
+      carry = r >>> 26;
+    }
+
+    this.length = a.length;
+    if (carry !== 0) {
+      this.words[this.length] = carry;
+      this.length++;
+    // Copy the rest of the words
+    } else if (a !== this) {
+      for (; i < a.length; i++) {
+        this.words[i] = a.words[i];
+      }
+    }
+
+    return this;
+  };
+
+  // Add `num` to `this`
+  BN.prototype.add = function add (num) {
+    var res;
+    if (num.negative !== 0 && this.negative === 0) {
+      num.negative = 0;
+      res = this.sub(num);
+      num.negative ^= 1;
+      return res;
+    } else if (num.negative === 0 && this.negative !== 0) {
+      this.negative = 0;
+      res = num.sub(this);
+      this.negative = 1;
+      return res;
+    }
+
+    if (this.length > num.length) return this.clone().iadd(num);
+
+    return num.clone().iadd(this);
+  };
+
+  // Subtract `num` from `this` in-place
+  BN.prototype.isub = function isub (num) {
+    // this - (-num) = this + num
+    if (num.negative !== 0) {
+      num.negative = 0;
+      var r = this.iadd(num);
+      num.negative = 1;
+      return r._normSign();
+
+    // -this - num = -(this + num)
+    } else if (this.negative !== 0) {
+      this.negative = 0;
+      this.iadd(num);
+      this.negative = 1;
+      return this._normSign();
+    }
+
+    // At this point both numbers are positive
+    var cmp = this.cmp(num);
+
+    // Optimization - zeroify
+    if (cmp === 0) {
+      this.negative = 0;
+      this.length = 1;
+      this.words[0] = 0;
+      return this;
+    }
+
+    // a > b
+    var a, b;
+    if (cmp > 0) {
+      a = this;
+      b = num;
+    } else {
+      a = num;
+      b = this;
+    }
+
+    var carry = 0;
+    for (var i = 0; i < b.length; i++) {
+      r = (a.words[i] | 0) - (b.words[i] | 0) + carry;
+      carry = r >> 26;
+      this.words[i] = r & 0x3ffffff;
+    }
+    for (; carry !== 0 && i < a.length; i++) {
+      r = (a.words[i] | 0) + carry;
+      carry = r >> 26;
+      this.words[i] = r & 0x3ffffff;
+    }
+
+    // Copy rest of the words
+    if (carry === 0 && i < a.length && a !== this) {
+      for (; i < a.length; i++) {
+        this.words[i] = a.words[i];
+      }
+    }
+
+    this.length = Math.max(this.length, i);
+
+    if (a !== this) {
+      this.negative = 1;
+    }
+
+    return this._strip();
+  };
+
+  // Subtract `num` from `this`
+  BN.prototype.sub = function sub (num) {
+    return this.clone().isub(num);
+  };
+
+  function smallMulTo (self, num, out) {
+    out.negative = num.negative ^ self.negative;
+    var len = (self.length + num.length) | 0;
+    out.length = len;
+    len = (len - 1) | 0;
+
+    // Peel one iteration (compiler can't do it, because of code complexity)
+    var a = self.words[0] | 0;
+    var b = num.words[0] | 0;
+    var r = a * b;
+
+    var lo = r & 0x3ffffff;
+    var carry = (r / 0x4000000) | 0;
+    out.words[0] = lo;
+
+    for (var k = 1; k < len; k++) {
+      // Sum all words with the same `i + j = k` and accumulate `ncarry`,
+      // note that ncarry could be >= 0x3ffffff
+      var ncarry = carry >>> 26;
+      var rword = carry & 0x3ffffff;
+      var maxJ = Math.min(k, num.length - 1);
+      for (var j = Math.max(0, k - self.length + 1); j <= maxJ; j++) {
+        var i = (k - j) | 0;
+        a = self.words[i] | 0;
+        b = num.words[j] | 0;
+        r = a * b + rword;
+        ncarry += (r / 0x4000000) | 0;
+        rword = r & 0x3ffffff;
+      }
+      out.words[k] = rword | 0;
+      carry = ncarry | 0;
+    }
+    if (carry !== 0) {
+      out.words[k] = carry | 0;
+    } else {
+      out.length--;
+    }
+
+    return out._strip();
+  }
+
+  // TODO(indutny): it may be reasonable to omit it for users who don't need
+  // to work with 256-bit numbers, otherwise it gives 20% improvement for 256-bit
+  // multiplication (like elliptic secp256k1).
+  var comb10MulTo = function comb10MulTo (self, num, out) {
+    var a = self.words;
+    var b = num.words;
+    var o = out.words;
+    var c = 0;
+    var lo;
+    var mid;
+    var hi;
+    var a0 = a[0] | 0;
+    var al0 = a0 & 0x1fff;
+    var ah0 = a0 >>> 13;
+    var a1 = a[1] | 0;
+    var al1 = a1 & 0x1fff;
+    var ah1 = a1 >>> 13;
+    var a2 = a[2] | 0;
+    var al2 = a2 & 0x1fff;
+    var ah2 = a2 >>> 13;
+    var a3 = a[3] | 0;
+    var al3 = a3 & 0x1fff;
+    var ah3 = a3 >>> 13;
+    var a4 = a[4] | 0;
+    var al4 = a4 & 0x1fff;
+    var ah4 = a4 >>> 13;
+    var a5 = a[5] | 0;
+    var al5 = a5 & 0x1fff;
+    var ah5 = a5 >>> 13;
+    var a6 = a[6] | 0;
+    var al6 = a6 & 0x1fff;
+    var ah6 = a6 >>> 13;
+    var a7 = a[7] | 0;
+    var al7 = a7 & 0x1fff;
+    var ah7 = a7 >>> 13;
+    var a8 = a[8] | 0;
+    var al8 = a8 & 0x1fff;
+    var ah8 = a8 >>> 13;
+    var a9 = a[9] | 0;
+    var al9 = a9 & 0x1fff;
+    var ah9 = a9 >>> 13;
+    var b0 = b[0] | 0;
+    var bl0 = b0 & 0x1fff;
+    var bh0 = b0 >>> 13;
+    var b1 = b[1] | 0;
+    var bl1 = b1 & 0x1fff;
+    var bh1 = b1 >>> 13;
+    var b2 = b[2] | 0;
+    var bl2 = b2 & 0x1fff;
+    var bh2 = b2 >>> 13;
+    var b3 = b[3] | 0;
+    var bl3 = b3 & 0x1fff;
+    var bh3 = b3 >>> 13;
+    var b4 = b[4] | 0;
+    var bl4 = b4 & 0x1fff;
+    var bh4 = b4 >>> 13;
+    var b5 = b[5] | 0;
+    var bl5 = b5 & 0x1fff;
+    var bh5 = b5 >>> 13;
+    var b6 = b[6] | 0;
+    var bl6 = b6 & 0x1fff;
+    var bh6 = b6 >>> 13;
+    var b7 = b[7] | 0;
+    var bl7 = b7 & 0x1fff;
+    var bh7 = b7 >>> 13;
+    var b8 = b[8] | 0;
+    var bl8 = b8 & 0x1fff;
+    var bh8 = b8 >>> 13;
+    var b9 = b[9] | 0;
+    var bl9 = b9 & 0x1fff;
+    var bh9 = b9 >>> 13;
+
+    out.negative = self.negative ^ num.negative;
+    out.length = 19;
+    /* k = 0 */
+    lo = Math.imul(al0, bl0);
+    mid = Math.imul(al0, bh0);
+    mid = (mid + Math.imul(ah0, bl0)) | 0;
+    hi = Math.imul(ah0, bh0);
+    var w0 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w0 >>> 26)) | 0;
+    w0 &= 0x3ffffff;
+    /* k = 1 */
+    lo = Math.imul(al1, bl0);
+    mid = Math.imul(al1, bh0);
+    mid = (mid + Math.imul(ah1, bl0)) | 0;
+    hi = Math.imul(ah1, bh0);
+    lo = (lo + Math.imul(al0, bl1)) | 0;
+    mid = (mid + Math.imul(al0, bh1)) | 0;
+    mid = (mid + Math.imul(ah0, bl1)) | 0;
+    hi = (hi + Math.imul(ah0, bh1)) | 0;
+    var w1 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w1 >>> 26)) | 0;
+    w1 &= 0x3ffffff;
+    /* k = 2 */
+    lo = Math.imul(al2, bl0);
+    mid = Math.imul(al2, bh0);
+    mid = (mid + Math.imul(ah2, bl0)) | 0;
+    hi = Math.imul(ah2, bh0);
+    lo = (lo + Math.imul(al1, bl1)) | 0;
+    mid = (mid + Math.imul(al1, bh1)) | 0;
+    mid = (mid + Math.imul(ah1, bl1)) | 0;
+    hi = (hi + Math.imul(ah1, bh1)) | 0;
+    lo = (lo + Math.imul(al0, bl2)) | 0;
+    mid = (mid + Math.imul(al0, bh2)) | 0;
+    mid = (mid + Math.imul(ah0, bl2)) | 0;
+    hi = (hi + Math.imul(ah0, bh2)) | 0;
+    var w2 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w2 >>> 26)) | 0;
+    w2 &= 0x3ffffff;
+    /* k = 3 */
+    lo = Math.imul(al3, bl0);
+    mid = Math.imul(al3, bh0);
+    mid = (mid + Math.imul(ah3, bl0)) | 0;
+    hi = Math.imul(ah3, bh0);
+    lo = (lo + Math.imul(al2, bl1)) | 0;
+    mid = (mid + Math.imul(al2, bh1)) | 0;
+    mid = (mid + Math.imul(ah2, bl1)) | 0;
+    hi = (hi + Math.imul(ah2, bh1)) | 0;
+    lo = (lo + Math.imul(al1, bl2)) | 0;
+    mid = (mid + Math.imul(al1, bh2)) | 0;
+    mid = (mid + Math.imul(ah1, bl2)) | 0;
+    hi = (hi + Math.imul(ah1, bh2)) | 0;
+    lo = (lo + Math.imul(al0, bl3)) | 0;
+    mid = (mid + Math.imul(al0, bh3)) | 0;
+    mid = (mid + Math.imul(ah0, bl3)) | 0;
+    hi = (hi + Math.imul(ah0, bh3)) | 0;
+    var w3 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w3 >>> 26)) | 0;
+    w3 &= 0x3ffffff;
+    /* k = 4 */
+    lo = Math.imul(al4, bl0);
+    mid = Math.imul(al4, bh0);
+    mid = (mid + Math.imul(ah4, bl0)) | 0;
+    hi = Math.imul(ah4, bh0);
+    lo = (lo + Math.imul(al3, bl1)) | 0;
+    mid = (mid + Math.imul(al3, bh1)) | 0;
+    mid = (mid + Math.imul(ah3, bl1)) | 0;
+    hi = (hi + Math.imul(ah3, bh1)) | 0;
+    lo = (lo + Math.imul(al2, bl2)) | 0;
+    mid = (mid + Math.imul(al2, bh2)) | 0;
+    mid = (mid + Math.imul(ah2, bl2)) | 0;
+    hi = (hi + Math.imul(ah2, bh2)) | 0;
+    lo = (lo + Math.imul(al1, bl3)) | 0;
+    mid = (mid + Math.imul(al1, bh3)) | 0;
+    mid = (mid + Math.imul(ah1, bl3)) | 0;
+    hi = (hi + Math.imul(ah1, bh3)) | 0;
+    lo = (lo + Math.imul(al0, bl4)) | 0;
+    mid = (mid + Math.imul(al0, bh4)) | 0;
+    mid = (mid + Math.imul(ah0, bl4)) | 0;
+    hi = (hi + Math.imul(ah0, bh4)) | 0;
+    var w4 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w4 >>> 26)) | 0;
+    w4 &= 0x3ffffff;
+    /* k = 5 */
+    lo = Math.imul(al5, bl0);
+    mid = Math.imul(al5, bh0);
+    mid = (mid + Math.imul(ah5, bl0)) | 0;
+    hi = Math.imul(ah5, bh0);
+    lo = (lo + Math.imul(al4, bl1)) | 0;
+    mid = (mid + Math.imul(al4, bh1)) | 0;
+    mid = (mid + Math.imul(ah4, bl1)) | 0;
+    hi = (hi + Math.imul(ah4, bh1)) | 0;
+    lo = (lo + Math.imul(al3, bl2)) | 0;
+    mid = (mid + Math.imul(al3, bh2)) | 0;
+    mid = (mid + Math.imul(ah3, bl2)) | 0;
+    hi = (hi + Math.imul(ah3, bh2)) | 0;
+    lo = (lo + Math.imul(al2, bl3)) | 0;
+    mid = (mid + Math.imul(al2, bh3)) | 0;
+    mid = (mid + Math.imul(ah2, bl3)) | 0;
+    hi = (hi + Math.imul(ah2, bh3)) | 0;
+    lo = (lo + Math.imul(al1, bl4)) | 0;
+    mid = (mid + Math.imul(al1, bh4)) | 0;
+    mid = (mid + Math.imul(ah1, bl4)) | 0;
+    hi = (hi + Math.imul(ah1, bh4)) | 0;
+    lo = (lo + Math.imul(al0, bl5)) | 0;
+    mid = (mid + Math.imul(al0, bh5)) | 0;
+    mid = (mid + Math.imul(ah0, bl5)) | 0;
+    hi = (hi + Math.imul(ah0, bh5)) | 0;
+    var w5 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w5 >>> 26)) | 0;
+    w5 &= 0x3ffffff;
+    /* k = 6 */
+    lo = Math.imul(al6, bl0);
+    mid = Math.imul(al6, bh0);
+    mid = (mid + Math.imul(ah6, bl0)) | 0;
+    hi = Math.imul(ah6, bh0);
+    lo = (lo + Math.imul(al5, bl1)) | 0;
+    mid = (mid + Math.imul(al5, bh1)) | 0;
+    mid = (mid + Math.imul(ah5, bl1)) | 0;
+    hi = (hi + Math.imul(ah5, bh1)) | 0;
+    lo = (lo + Math.imul(al4, bl2)) | 0;
+    mid = (mid + Math.imul(al4, bh2)) | 0;
+    mid = (mid + Math.imul(ah4, bl2)) | 0;
+    hi = (hi + Math.imul(ah4, bh2)) | 0;
+    lo = (lo + Math.imul(al3, bl3)) | 0;
+    mid = (mid + Math.imul(al3, bh3)) | 0;
+    mid = (mid + Math.imul(ah3, bl3)) | 0;
+    hi = (hi + Math.imul(ah3, bh3)) | 0;
+    lo = (lo + Math.imul(al2, bl4)) | 0;
+    mid = (mid + Math.imul(al2, bh4)) | 0;
+    mid = (mid + Math.imul(ah2, bl4)) | 0;
+    hi = (hi + Math.imul(ah2, bh4)) | 0;
+    lo = (lo + Math.imul(al1, bl5)) | 0;
+    mid = (mid + Math.imul(al1, bh5)) | 0;
+    mid = (mid + Math.imul(ah1, bl5)) | 0;
+    hi = (hi + Math.imul(ah1, bh5)) | 0;
+    lo = (lo + Math.imul(al0, bl6)) | 0;
+    mid = (mid + Math.imul(al0, bh6)) | 0;
+    mid = (mid + Math.imul(ah0, bl6)) | 0;
+    hi = (hi + Math.imul(ah0, bh6)) | 0;
+    var w6 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w6 >>> 26)) | 0;
+    w6 &= 0x3ffffff;
+    /* k = 7 */
+    lo = Math.imul(al7, bl0);
+    mid = Math.imul(al7, bh0);
+    mid = (mid + Math.imul(ah7, bl0)) | 0;
+    hi = Math.imul(ah7, bh0);
+    lo = (lo + Math.imul(al6, bl1)) | 0;
+    mid = (mid + Math.imul(al6, bh1)) | 0;
+    mid = (mid + Math.imul(ah6, bl1)) | 0;
+    hi = (hi + Math.imul(ah6, bh1)) | 0;
+    lo = (lo + Math.imul(al5, bl2)) | 0;
+    mid = (mid + Math.imul(al5, bh2)) | 0;
+    mid = (mid + Math.imul(ah5, bl2)) | 0;
+    hi = (hi + Math.imul(ah5, bh2)) | 0;
+    lo = (lo + Math.imul(al4, bl3)) | 0;
+    mid = (mid + Math.imul(al4, bh3)) | 0;
+    mid = (mid + Math.imul(ah4, bl3)) | 0;
+    hi = (hi + Math.imul(ah4, bh3)) | 0;
+    lo = (lo + Math.imul(al3, bl4)) | 0;
+    mid = (mid + Math.imul(al3, bh4)) | 0;
+    mid = (mid + Math.imul(ah3, bl4)) | 0;
+    hi = (hi + Math.imul(ah3, bh4)) | 0;
+    lo = (lo + Math.imul(al2, bl5)) | 0;
+    mid = (mid + Math.imul(al2, bh5)) | 0;
+    mid = (mid + Math.imul(ah2, bl5)) | 0;
+    hi = (hi + Math.imul(ah2, bh5)) | 0;
+    lo = (lo + Math.imul(al1, bl6)) | 0;
+    mid = (mid + Math.imul(al1, bh6)) | 0;
+    mid = (mid + Math.imul(ah1, bl6)) | 0;
+    hi = (hi + Math.imul(ah1, bh6)) | 0;
+    lo = (lo + Math.imul(al0, bl7)) | 0;
+    mid = (mid + Math.imul(al0, bh7)) | 0;
+    mid = (mid + Math.imul(ah0, bl7)) | 0;
+    hi = (hi + Math.imul(ah0, bh7)) | 0;
+    var w7 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w7 >>> 26)) | 0;
+    w7 &= 0x3ffffff;
+    /* k = 8 */
+    lo = Math.imul(al8, bl0);
+    mid = Math.imul(al8, bh0);
+    mid = (mid + Math.imul(ah8, bl0)) | 0;
+    hi = Math.imul(ah8, bh0);
+    lo = (lo + Math.imul(al7, bl1)) | 0;
+    mid = (mid + Math.imul(al7, bh1)) | 0;
+    mid = (mid + Math.imul(ah7, bl1)) | 0;
+    hi = (hi + Math.imul(ah7, bh1)) | 0;
+    lo = (lo + Math.imul(al6, bl2)) | 0;
+    mid = (mid + Math.imul(al6, bh2)) | 0;
+    mid = (mid + Math.imul(ah6, bl2)) | 0;
+    hi = (hi + Math.imul(ah6, bh2)) | 0;
+    lo = (lo + Math.imul(al5, bl3)) | 0;
+    mid = (mid + Math.imul(al5, bh3)) | 0;
+    mid = (mid + Math.imul(ah5, bl3)) | 0;
+    hi = (hi + Math.imul(ah5, bh3)) | 0;
+    lo = (lo + Math.imul(al4, bl4)) | 0;
+    mid = (mid + Math.imul(al4, bh4)) | 0;
+    mid = (mid + Math.imul(ah4, bl4)) | 0;
+    hi = (hi + Math.imul(ah4, bh4)) | 0;
+    lo = (lo + Math.imul(al3, bl5)) | 0;
+    mid = (mid + Math.imul(al3, bh5)) | 0;
+    mid = (mid + Math.imul(ah3, bl5)) | 0;
+    hi = (hi + Math.imul(ah3, bh5)) | 0;
+    lo = (lo + Math.imul(al2, bl6)) | 0;
+    mid = (mid + Math.imul(al2, bh6)) | 0;
+    mid = (mid + Math.imul(ah2, bl6)) | 0;
+    hi = (hi + Math.imul(ah2, bh6)) | 0;
+    lo = (lo + Math.imul(al1, bl7)) | 0;
+    mid = (mid + Math.imul(al1, bh7)) | 0;
+    mid = (mid + Math.imul(ah1, bl7)) | 0;
+    hi = (hi + Math.imul(ah1, bh7)) | 0;
+    lo = (lo + Math.imul(al0, bl8)) | 0;
+    mid = (mid + Math.imul(al0, bh8)) | 0;
+    mid = (mid + Math.imul(ah0, bl8)) | 0;
+    hi = (hi + Math.imul(ah0, bh8)) | 0;
+    var w8 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w8 >>> 26)) | 0;
+    w8 &= 0x3ffffff;
+    /* k = 9 */
+    lo = Math.imul(al9, bl0);
+    mid = Math.imul(al9, bh0);
+    mid = (mid + Math.imul(ah9, bl0)) | 0;
+    hi = Math.imul(ah9, bh0);
+    lo = (lo + Math.imul(al8, bl1)) | 0;
+    mid = (mid + Math.imul(al8, bh1)) | 0;
+    mid = (mid + Math.imul(ah8, bl1)) | 0;
+    hi = (hi + Math.imul(ah8, bh1)) | 0;
+    lo = (lo + Math.imul(al7, bl2)) | 0;
+    mid = (mid + Math.imul(al7, bh2)) | 0;
+    mid = (mid + Math.imul(ah7, bl2)) | 0;
+    hi = (hi + Math.imul(ah7, bh2)) | 0;
+    lo = (lo + Math.imul(al6, bl3)) | 0;
+    mid = (mid + Math.imul(al6, bh3)) | 0;
+    mid = (mid + Math.imul(ah6, bl3)) | 0;
+    hi = (hi + Math.imul(ah6, bh3)) | 0;
+    lo = (lo + Math.imul(al5, bl4)) | 0;
+    mid = (mid + Math.imul(al5, bh4)) | 0;
+    mid = (mid + Math.imul(ah5, bl4)) | 0;
+    hi = (hi + Math.imul(ah5, bh4)) | 0;
+    lo = (lo + Math.imul(al4, bl5)) | 0;
+    mid = (mid + Math.imul(al4, bh5)) | 0;
+    mid = (mid + Math.imul(ah4, bl5)) | 0;
+    hi = (hi + Math.imul(ah4, bh5)) | 0;
+    lo = (lo + Math.imul(al3, bl6)) | 0;
+    mid = (mid + Math.imul(al3, bh6)) | 0;
+    mid = (mid + Math.imul(ah3, bl6)) | 0;
+    hi = (hi + Math.imul(ah3, bh6)) | 0;
+    lo = (lo + Math.imul(al2, bl7)) | 0;
+    mid = (mid + Math.imul(al2, bh7)) | 0;
+    mid = (mid + Math.imul(ah2, bl7)) | 0;
+    hi = (hi + Math.imul(ah2, bh7)) | 0;
+    lo = (lo + Math.imul(al1, bl8)) | 0;
+    mid = (mid + Math.imul(al1, bh8)) | 0;
+    mid = (mid + Math.imul(ah1, bl8)) | 0;
+    hi = (hi + Math.imul(ah1, bh8)) | 0;
+    lo = (lo + Math.imul(al0, bl9)) | 0;
+    mid = (mid + Math.imul(al0, bh9)) | 0;
+    mid = (mid + Math.imul(ah0, bl9)) | 0;
+    hi = (hi + Math.imul(ah0, bh9)) | 0;
+    var w9 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w9 >>> 26)) | 0;
+    w9 &= 0x3ffffff;
+    /* k = 10 */
+    lo = Math.imul(al9, bl1);
+    mid = Math.imul(al9, bh1);
+    mid = (mid + Math.imul(ah9, bl1)) | 0;
+    hi = Math.imul(ah9, bh1);
+    lo = (lo + Math.imul(al8, bl2)) | 0;
+    mid = (mid + Math.imul(al8, bh2)) | 0;
+    mid = (mid + Math.imul(ah8, bl2)) | 0;
+    hi = (hi + Math.imul(ah8, bh2)) | 0;
+    lo = (lo + Math.imul(al7, bl3)) | 0;
+    mid = (mid + Math.imul(al7, bh3)) | 0;
+    mid = (mid + Math.imul(ah7, bl3)) | 0;
+    hi = (hi + Math.imul(ah7, bh3)) | 0;
+    lo = (lo + Math.imul(al6, bl4)) | 0;
+    mid = (mid + Math.imul(al6, bh4)) | 0;
+    mid = (mid + Math.imul(ah6, bl4)) | 0;
+    hi = (hi + Math.imul(ah6, bh4)) | 0;
+    lo = (lo + Math.imul(al5, bl5)) | 0;
+    mid = (mid + Math.imul(al5, bh5)) | 0;
+    mid = (mid + Math.imul(ah5, bl5)) | 0;
+    hi = (hi + Math.imul(ah5, bh5)) | 0;
+    lo = (lo + Math.imul(al4, bl6)) | 0;
+    mid = (mid + Math.imul(al4, bh6)) | 0;
+    mid = (mid + Math.imul(ah4, bl6)) | 0;
+    hi = (hi + Math.imul(ah4, bh6)) | 0;
+    lo = (lo + Math.imul(al3, bl7)) | 0;
+    mid = (mid + Math.imul(al3, bh7)) | 0;
+    mid = (mid + Math.imul(ah3, bl7)) | 0;
+    hi = (hi + Math.imul(ah3, bh7)) | 0;
+    lo = (lo + Math.imul(al2, bl8)) | 0;
+    mid = (mid + Math.imul(al2, bh8)) | 0;
+    mid = (mid + Math.imul(ah2, bl8)) | 0;
+    hi = (hi + Math.imul(ah2, bh8)) | 0;
+    lo = (lo + Math.imul(al1, bl9)) | 0;
+    mid = (mid + Math.imul(al1, bh9)) | 0;
+    mid = (mid + Math.imul(ah1, bl9)) | 0;
+    hi = (hi + Math.imul(ah1, bh9)) | 0;
+    var w10 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w10 >>> 26)) | 0;
+    w10 &= 0x3ffffff;
+    /* k = 11 */
+    lo = Math.imul(al9, bl2);
+    mid = Math.imul(al9, bh2);
+    mid = (mid + Math.imul(ah9, bl2)) | 0;
+    hi = Math.imul(ah9, bh2);
+    lo = (lo + Math.imul(al8, bl3)) | 0;
+    mid = (mid + Math.imul(al8, bh3)) | 0;
+    mid = (mid + Math.imul(ah8, bl3)) | 0;
+    hi = (hi + Math.imul(ah8, bh3)) | 0;
+    lo = (lo + Math.imul(al7, bl4)) | 0;
+    mid = (mid + Math.imul(al7, bh4)) | 0;
+    mid = (mid + Math.imul(ah7, bl4)) | 0;
+    hi = (hi + Math.imul(ah7, bh4)) | 0;
+    lo = (lo + Math.imul(al6, bl5)) | 0;
+    mid = (mid + Math.imul(al6, bh5)) | 0;
+    mid = (mid + Math.imul(ah6, bl5)) | 0;
+    hi = (hi + Math.imul(ah6, bh5)) | 0;
+    lo = (lo + Math.imul(al5, bl6)) | 0;
+    mid = (mid + Math.imul(al5, bh6)) | 0;
+    mid = (mid + Math.imul(ah5, bl6)) | 0;
+    hi = (hi + Math.imul(ah5, bh6)) | 0;
+    lo = (lo + Math.imul(al4, bl7)) | 0;
+    mid = (mid + Math.imul(al4, bh7)) | 0;
+    mid = (mid + Math.imul(ah4, bl7)) | 0;
+    hi = (hi + Math.imul(ah4, bh7)) | 0;
+    lo = (lo + Math.imul(al3, bl8)) | 0;
+    mid = (mid + Math.imul(al3, bh8)) | 0;
+    mid = (mid + Math.imul(ah3, bl8)) | 0;
+    hi = (hi + Math.imul(ah3, bh8)) | 0;
+    lo = (lo + Math.imul(al2, bl9)) | 0;
+    mid = (mid + Math.imul(al2, bh9)) | 0;
+    mid = (mid + Math.imul(ah2, bl9)) | 0;
+    hi = (hi + Math.imul(ah2, bh9)) | 0;
+    var w11 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w11 >>> 26)) | 0;
+    w11 &= 0x3ffffff;
+    /* k = 12 */
+    lo = Math.imul(al9, bl3);
+    mid = Math.imul(al9, bh3);
+    mid = (mid + Math.imul(ah9, bl3)) | 0;
+    hi = Math.imul(ah9, bh3);
+    lo = (lo + Math.imul(al8, bl4)) | 0;
+    mid = (mid + Math.imul(al8, bh4)) | 0;
+    mid = (mid + Math.imul(ah8, bl4)) | 0;
+    hi = (hi + Math.imul(ah8, bh4)) | 0;
+    lo = (lo + Math.imul(al7, bl5)) | 0;
+    mid = (mid + Math.imul(al7, bh5)) | 0;
+    mid = (mid + Math.imul(ah7, bl5)) | 0;
+    hi = (hi + Math.imul(ah7, bh5)) | 0;
+    lo = (lo + Math.imul(al6, bl6)) | 0;
+    mid = (mid + Math.imul(al6, bh6)) | 0;
+    mid = (mid + Math.imul(ah6, bl6)) | 0;
+    hi = (hi + Math.imul(ah6, bh6)) | 0;
+    lo = (lo + Math.imul(al5, bl7)) | 0;
+    mid = (mid + Math.imul(al5, bh7)) | 0;
+    mid = (mid + Math.imul(ah5, bl7)) | 0;
+    hi = (hi + Math.imul(ah5, bh7)) | 0;
+    lo = (lo + Math.imul(al4, bl8)) | 0;
+    mid = (mid + Math.imul(al4, bh8)) | 0;
+    mid = (mid + Math.imul(ah4, bl8)) | 0;
+    hi = (hi + Math.imul(ah4, bh8)) | 0;
+    lo = (lo + Math.imul(al3, bl9)) | 0;
+    mid = (mid + Math.imul(al3, bh9)) | 0;
+    mid = (mid + Math.imul(ah3, bl9)) | 0;
+    hi = (hi + Math.imul(ah3, bh9)) | 0;
+    var w12 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w12 >>> 26)) | 0;
+    w12 &= 0x3ffffff;
+    /* k = 13 */
+    lo = Math.imul(al9, bl4);
+    mid = Math.imul(al9, bh4);
+    mid = (mid + Math.imul(ah9, bl4)) | 0;
+    hi = Math.imul(ah9, bh4);
+    lo = (lo + Math.imul(al8, bl5)) | 0;
+    mid = (mid + Math.imul(al8, bh5)) | 0;
+    mid = (mid + Math.imul(ah8, bl5)) | 0;
+    hi = (hi + Math.imul(ah8, bh5)) | 0;
+    lo = (lo + Math.imul(al7, bl6)) | 0;
+    mid = (mid + Math.imul(al7, bh6)) | 0;
+    mid = (mid + Math.imul(ah7, bl6)) | 0;
+    hi = (hi + Math.imul(ah7, bh6)) | 0;
+    lo = (lo + Math.imul(al6, bl7)) | 0;
+    mid = (mid + Math.imul(al6, bh7)) | 0;
+    mid = (mid + Math.imul(ah6, bl7)) | 0;
+    hi = (hi + Math.imul(ah6, bh7)) | 0;
+    lo = (lo + Math.imul(al5, bl8)) | 0;
+    mid = (mid + Math.imul(al5, bh8)) | 0;
+    mid = (mid + Math.imul(ah5, bl8)) | 0;
+    hi = (hi + Math.imul(ah5, bh8)) | 0;
+    lo = (lo + Math.imul(al4, bl9)) | 0;
+    mid = (mid + Math.imul(al4, bh9)) | 0;
+    mid = (mid + Math.imul(ah4, bl9)) | 0;
+    hi = (hi + Math.imul(ah4, bh9)) | 0;
+    var w13 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w13 >>> 26)) | 0;
+    w13 &= 0x3ffffff;
+    /* k = 14 */
+    lo = Math.imul(al9, bl5);
+    mid = Math.imul(al9, bh5);
+    mid = (mid + Math.imul(ah9, bl5)) | 0;
+    hi = Math.imul(ah9, bh5);
+    lo = (lo + Math.imul(al8, bl6)) | 0;
+    mid = (mid + Math.imul(al8, bh6)) | 0;
+    mid = (mid + Math.imul(ah8, bl6)) | 0;
+    hi = (hi + Math.imul(ah8, bh6)) | 0;
+    lo = (lo + Math.imul(al7, bl7)) | 0;
+    mid = (mid + Math.imul(al7, bh7)) | 0;
+    mid = (mid + Math.imul(ah7, bl7)) | 0;
+    hi = (hi + Math.imul(ah7, bh7)) | 0;
+    lo = (lo + Math.imul(al6, bl8)) | 0;
+    mid = (mid + Math.imul(al6, bh8)) | 0;
+    mid = (mid + Math.imul(ah6, bl8)) | 0;
+    hi = (hi + Math.imul(ah6, bh8)) | 0;
+    lo = (lo + Math.imul(al5, bl9)) | 0;
+    mid = (mid + Math.imul(al5, bh9)) | 0;
+    mid = (mid + Math.imul(ah5, bl9)) | 0;
+    hi = (hi + Math.imul(ah5, bh9)) | 0;
+    var w14 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w14 >>> 26)) | 0;
+    w14 &= 0x3ffffff;
+    /* k = 15 */
+    lo = Math.imul(al9, bl6);
+    mid = Math.imul(al9, bh6);
+    mid = (mid + Math.imul(ah9, bl6)) | 0;
+    hi = Math.imul(ah9, bh6);
+    lo = (lo + Math.imul(al8, bl7)) | 0;
+    mid = (mid + Math.imul(al8, bh7)) | 0;
+    mid = (mid + Math.imul(ah8, bl7)) | 0;
+    hi = (hi + Math.imul(ah8, bh7)) | 0;
+    lo = (lo + Math.imul(al7, bl8)) | 0;
+    mid = (mid + Math.imul(al7, bh8)) | 0;
+    mid = (mid + Math.imul(ah7, bl8)) | 0;
+    hi = (hi + Math.imul(ah7, bh8)) | 0;
+    lo = (lo + Math.imul(al6, bl9)) | 0;
+    mid = (mid + Math.imul(al6, bh9)) | 0;
+    mid = (mid + Math.imul(ah6, bl9)) | 0;
+    hi = (hi + Math.imul(ah6, bh9)) | 0;
+    var w15 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w15 >>> 26)) | 0;
+    w15 &= 0x3ffffff;
+    /* k = 16 */
+    lo = Math.imul(al9, bl7);
+    mid = Math.imul(al9, bh7);
+    mid = (mid + Math.imul(ah9, bl7)) | 0;
+    hi = Math.imul(ah9, bh7);
+    lo = (lo + Math.imul(al8, bl8)) | 0;
+    mid = (mid + Math.imul(al8, bh8)) | 0;
+    mid = (mid + Math.imul(ah8, bl8)) | 0;
+    hi = (hi + Math.imul(ah8, bh8)) | 0;
+    lo = (lo + Math.imul(al7, bl9)) | 0;
+    mid = (mid + Math.imul(al7, bh9)) | 0;
+    mid = (mid + Math.imul(ah7, bl9)) | 0;
+    hi = (hi + Math.imul(ah7, bh9)) | 0;
+    var w16 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w16 >>> 26)) | 0;
+    w16 &= 0x3ffffff;
+    /* k = 17 */
+    lo = Math.imul(al9, bl8);
+    mid = Math.imul(al9, bh8);
+    mid = (mid + Math.imul(ah9, bl8)) | 0;
+    hi = Math.imul(ah9, bh8);
+    lo = (lo + Math.imul(al8, bl9)) | 0;
+    mid = (mid + Math.imul(al8, bh9)) | 0;
+    mid = (mid + Math.imul(ah8, bl9)) | 0;
+    hi = (hi + Math.imul(ah8, bh9)) | 0;
+    var w17 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w17 >>> 26)) | 0;
+    w17 &= 0x3ffffff;
+    /* k = 18 */
+    lo = Math.imul(al9, bl9);
+    mid = Math.imul(al9, bh9);
+    mid = (mid + Math.imul(ah9, bl9)) | 0;
+    hi = Math.imul(ah9, bh9);
+    var w18 = (((c + lo) | 0) + ((mid & 0x1fff) << 13)) | 0;
+    c = (((hi + (mid >>> 13)) | 0) + (w18 >>> 26)) | 0;
+    w18 &= 0x3ffffff;
+    o[0] = w0;
+    o[1] = w1;
+    o[2] = w2;
+    o[3] = w3;
+    o[4] = w4;
+    o[5] = w5;
+    o[6] = w6;
+    o[7] = w7;
+    o[8] = w8;
+    o[9] = w9;
+    o[10] = w10;
+    o[11] = w11;
+    o[12] = w12;
+    o[13] = w13;
+    o[14] = w14;
+    o[15] = w15;
+    o[16] = w16;
+    o[17] = w17;
+    o[18] = w18;
+    if (c !== 0) {
+      o[19] = c;
+      out.length++;
+    }
+    return out;
+  };
+
+  // Polyfill comb
+  if (!Math.imul) {
+    comb10MulTo = smallMulTo;
+  }
+
+  function bigMulTo (self, num, out) {
+    out.negative = num.negative ^ self.negative;
+    out.length = self.length + num.length;
+
+    var carry = 0;
+    var hncarry = 0;
+    for (var k = 0; k < out.length - 1; k++) {
+      // Sum all words with the same `i + j = k` and accumulate `ncarry`,
+      // note that ncarry could be >= 0x3ffffff
+      var ncarry = hncarry;
+      hncarry = 0;
+      var rword = carry & 0x3ffffff;
+      var maxJ = Math.min(k, num.length - 1);
+      for (var j = Math.max(0, k - self.length + 1); j <= maxJ; j++) {
+        var i = k - j;
+        var a = self.words[i] | 0;
+        var b = num.words[j] | 0;
+        var r = a * b;
+
+        var lo = r & 0x3ffffff;
+        ncarry = (ncarry + ((r / 0x4000000) | 0)) | 0;
+        lo = (lo + rword) | 0;
+        rword = lo & 0x3ffffff;
+        ncarry = (ncarry + (lo >>> 26)) | 0;
+
+        hncarry += ncarry >>> 26;
+        ncarry &= 0x3ffffff;
+      }
+      out.words[k] = rword;
+      carry = ncarry;
+      ncarry = hncarry;
+    }
+    if (carry !== 0) {
+      out.words[k] = carry;
+    } else {
+      out.length--;
+    }
+
+    return out._strip();
+  }
+
+  function jumboMulTo (self, num, out) {
+    // Temporary disable, see https://github.com/indutny/bn.js/issues/211
+    // var fftm = new FFTM();
+    // return fftm.mulp(self, num, out);
+    return bigMulTo(self, num, out);
+  }
+
+  BN.prototype.mulTo = function mulTo (num, out) {
+    var res;
+    var len = this.length + num.length;
+    if (this.length === 10 && num.length === 10) {
+      res = comb10MulTo(this, num, out);
+    } else if (len < 63) {
+      res = smallMulTo(this, num, out);
+    } else if (len < 1024) {
+      res = bigMulTo(this, num, out);
+    } else {
+      res = jumboMulTo(this, num, out);
+    }
+
+    return res;
+  };
+
+  // Cooley-Tukey algorithm for FFT
+  // slightly revisited to rely on looping instead of recursion
+
+  function FFTM (x, y) {
+    this.x = x;
+    this.y = y;
+  }
+
+  FFTM.prototype.makeRBT = function makeRBT (N) {
+    var t = new Array(N);
+    var l = BN.prototype._countBits(N) - 1;
+    for (var i = 0; i < N; i++) {
+      t[i] = this.revBin(i, l, N);
+    }
+
+    return t;
+  };
+
+  // Returns binary-reversed representation of `x`
+  FFTM.prototype.revBin = function revBin (x, l, N) {
+    if (x === 0 || x === N - 1) return x;
+
+    var rb = 0;
+    for (var i = 0; i < l; i++) {
+      rb |= (x & 1) << (l - i - 1);
+      x >>= 1;
+    }
+
+    return rb;
+  };
+
+  // Performs "tweedling" phase, therefore 'emulating'
+  // behaviour of the recursive algorithm
+  FFTM.prototype.permute = function permute (rbt, rws, iws, rtws, itws, N) {
+    for (var i = 0; i < N; i++) {
+      rtws[i] = rws[rbt[i]];
+      itws[i] = iws[rbt[i]];
+    }
+  };
+
+  FFTM.prototype.transform = function transform (rws, iws, rtws, itws, N, rbt) {
+    this.permute(rbt, rws, iws, rtws, itws, N);
+
+    for (var s = 1; s < N; s <<= 1) {
+      var l = s << 1;
+
+      var rtwdf = Math.cos(2 * Math.PI / l);
+      var itwdf = Math.sin(2 * Math.PI / l);
+
+      for (var p = 0; p < N; p += l) {
+        var rtwdf_ = rtwdf;
+        var itwdf_ = itwdf;
+
+        for (var j = 0; j < s; j++) {
+          var re = rtws[p + j];
+          var ie = itws[p + j];
+
+          var ro = rtws[p + j + s];
+          var io = itws[p + j + s];
+
+          var rx = rtwdf_ * ro - itwdf_ * io;
+
+          io = rtwdf_ * io + itwdf_ * ro;
+          ro = rx;
+
+          rtws[p + j] = re + ro;
+          itws[p + j] = ie + io;
+
+          rtws[p + j + s] = re - ro;
+          itws[p + j + s] = ie - io;
+
+          /* jshint maxdepth : false */
+          if (j !== l) {
+            rx = rtwdf * rtwdf_ - itwdf * itwdf_;
+
+            itwdf_ = rtwdf * itwdf_ + itwdf * rtwdf_;
+            rtwdf_ = rx;
+          }
+        }
+      }
+    }
+  };
+
+  FFTM.prototype.guessLen13b = function guessLen13b (n, m) {
+    var N = Math.max(m, n) | 1;
+    var odd = N & 1;
+    var i = 0;
+    for (N = N / 2 | 0; N; N = N >>> 1) {
+      i++;
+    }
+
+    return 1 << i + 1 + odd;
+  };
+
+  FFTM.prototype.conjugate = function conjugate (rws, iws, N) {
+    if (N <= 1) return;
+
+    for (var i = 0; i < N / 2; i++) {
+      var t = rws[i];
+
+      rws[i] = rws[N - i - 1];
+      rws[N - i - 1] = t;
+
+      t = iws[i];
+
+      iws[i] = -iws[N - i - 1];
+      iws[N - i - 1] = -t;
+    }
+  };
+
+  FFTM.prototype.normalize13b = function normalize13b (ws, N) {
+    var carry = 0;
+    for (var i = 0; i < N / 2; i++) {
+      var w = Math.round(ws[2 * i + 1] / N) * 0x2000 +
+        Math.round(ws[2 * i] / N) +
+        carry;
+
+      ws[i] = w & 0x3ffffff;
+
+      if (w < 0x4000000) {
+        carry = 0;
+      } else {
+        carry = w / 0x4000000 | 0;
+      }
+    }
+
+    return ws;
+  };
+
+  FFTM.prototype.convert13b = function convert13b (ws, len, rws, N) {
+    var carry = 0;
+    for (var i = 0; i < len; i++) {
+      carry = carry + (ws[i] | 0);
+
+      rws[2 * i] = carry & 0x1fff; carry = carry >>> 13;
+      rws[2 * i + 1] = carry & 0x1fff; carry = carry >>> 13;
+    }
+
+    // Pad with zeroes
+    for (i = 2 * len; i < N; ++i) {
+      rws[i] = 0;
+    }
+
+    assert(carry === 0);
+    assert((carry & ~0x1fff) === 0);
+  };
+
+  FFTM.prototype.stub = function stub (N) {
+    var ph = new Array(N);
+    for (var i = 0; i < N; i++) {
+      ph[i] = 0;
+    }
+
+    return ph;
+  };
+
+  FFTM.prototype.mulp = function mulp (x, y, out) {
+    var N = 2 * this.guessLen13b(x.length, y.length);
+
+    var rbt = this.makeRBT(N);
+
+    var _ = this.stub(N);
+
+    var rws = new Array(N);
+    var rwst = new Array(N);
+    var iwst = new Array(N);
+
+    var nrws = new Array(N);
+    var nrwst = new Array(N);
+    var niwst = new Array(N);
+
+    var rmws = out.words;
+    rmws.length = N;
+
+    this.convert13b(x.words, x.length, rws, N);
+    this.convert13b(y.words, y.length, nrws, N);
+
+    this.transform(rws, _, rwst, iwst, N, rbt);
+    this.transform(nrws, _, nrwst, niwst, N, rbt);
+
+    for (var i = 0; i < N; i++) {
+      var rx = rwst[i] * nrwst[i] - iwst[i] * niwst[i];
+      iwst[i] = rwst[i] * niwst[i] + iwst[i] * nrwst[i];
+      rwst[i] = rx;
+    }
+
+    this.conjugate(rwst, iwst, N);
+    this.transform(rwst, iwst, rmws, _, N, rbt);
+    this.conjugate(rmws, _, N);
+    this.normalize13b(rmws, N);
+
+    out.negative = x.negative ^ y.negative;
+    out.length = x.length + y.length;
+    return out._strip();
+  };
+
+  // Multiply `this` by `num`
+  BN.prototype.mul = function mul (num) {
+    var out = new BN(null);
+    out.words = new Array(this.length + num.length);
+    return this.mulTo(num, out);
+  };
+
+  // Multiply employing FFT
+  BN.prototype.mulf = function mulf (num) {
+    var out = new BN(null);
+    out.words = new Array(this.length + num.length);
+    return jumboMulTo(this, num, out);
+  };
+
+  // In-place Multiplication
+  BN.prototype.imul = function imul (num) {
+    return this.clone().mulTo(num, this);
+  };
+
+  BN.prototype.imuln = function imuln (num) {
+    var isNegNum = num < 0;
+    if (isNegNum) num = -num;
+
+    assert(typeof num === 'number');
+    assert(num < 0x4000000);
+
+    // Carry
+    var carry = 0;
+    for (var i = 0; i < this.length; i++) {
+      var w = (this.words[i] | 0) * num;
+      var lo = (w & 0x3ffffff) + (carry & 0x3ffffff);
+      carry >>= 26;
+      carry += (w / 0x4000000) | 0;
+      // NOTE: lo is 27bit maximum
+      carry += lo >>> 26;
+      this.words[i] = lo & 0x3ffffff;
+    }
+
+    if (carry !== 0) {
+      this.words[i] = carry;
+      this.length++;
+    }
+
+    return isNegNum ? this.ineg() : this;
+  };
+
+  BN.prototype.muln = function muln (num) {
+    return this.clone().imuln(num);
+  };
+
+  // `this` * `this`
+  BN.prototype.sqr = function sqr () {
+    return this.mul(this);
+  };
+
+  // `this` * `this` in-place
+  BN.prototype.isqr = function isqr () {
+    return this.imul(this.clone());
+  };
+
+  // Math.pow(`this`, `num`)
+  BN.prototype.pow = function pow (num) {
+    var w = toBitArray(num);
+    if (w.length === 0) return new BN(1);
+
+    // Skip leading zeroes
+    var res = this;
+    for (var i = 0; i < w.length; i++, res = res.sqr()) {
+      if (w[i] !== 0) break;
+    }
+
+    if (++i < w.length) {
+      for (var q = res.sqr(); i < w.length; i++, q = q.sqr()) {
+        if (w[i] === 0) continue;
+
+        res = res.mul(q);
+      }
+    }
+
+    return res;
+  };
+
+  // Shift-left in-place
+  BN.prototype.iushln = function iushln (bits) {
+    assert(typeof bits === 'number' && bits >= 0);
+    var r = bits % 26;
+    var s = (bits - r) / 26;
+    var carryMask = (0x3ffffff >>> (26 - r)) << (26 - r);
+    var i;
+
+    if (r !== 0) {
+      var carry = 0;
+
+      for (i = 0; i < this.length; i++) {
+        var newCarry = this.words[i] & carryMask;
+        var c = ((this.words[i] | 0) - newCarry) << r;
+        this.words[i] = c | carry;
+        carry = newCarry >>> (26 - r);
+      }
+
+      if (carry) {
+        this.words[i] = carry;
+        this.length++;
+      }
+    }
+
+    if (s !== 0) {
+      for (i = this.length - 1; i >= 0; i--) {
+        this.words[i + s] = this.words[i];
+      }
+
+      for (i = 0; i < s; i++) {
+        this.words[i] = 0;
+      }
+
+      this.length += s;
+    }
+
+    return this._strip();
+  };
+
+  BN.prototype.ishln = function ishln (bits) {
+    // TODO(indutny): implement me
+    assert(this.negative === 0);
+    return this.iushln(bits);
+  };
+
+  // Shift-right in-place
+  // NOTE: `hint` is a lowest bit before trailing zeroes
+  // NOTE: if `extended` is present - it will be filled with destroyed bits
+  BN.prototype.iushrn = function iushrn (bits, hint, extended) {
+    assert(typeof bits === 'number' && bits >= 0);
+    var h;
+    if (hint) {
+      h = (hint - (hint % 26)) / 26;
+    } else {
+      h = 0;
+    }
+
+    var r = bits % 26;
+    var s = Math.min((bits - r) / 26, this.length);
+    var mask = 0x3ffffff ^ ((0x3ffffff >>> r) << r);
+    var maskedWords = extended;
+
+    h -= s;
+    h = Math.max(0, h);
+
+    // Extended mode, copy masked part
+    if (maskedWords) {
+      for (var i = 0; i < s; i++) {
+        maskedWords.words[i] = this.words[i];
+      }
+      maskedWords.length = s;
+    }
+
+    if (s === 0) {
+      // No-op, we should not move anything at all
+    } else if (this.length > s) {
+      this.length -= s;
+      for (i = 0; i < this.length; i++) {
+        this.words[i] = this.words[i + s];
+      }
+    } else {
+      this.words[0] = 0;
+      this.length = 1;
+    }
+
+    var carry = 0;
+    for (i = this.length - 1; i >= 0 && (carry !== 0 || i >= h); i--) {
+      var word = this.words[i] | 0;
+      this.words[i] = (carry << (26 - r)) | (word >>> r);
+      carry = word & mask;
+    }
+
+    // Push carried bits as a mask
+    if (maskedWords && carry !== 0) {
+      maskedWords.words[maskedWords.length++] = carry;
+    }
+
+    if (this.length === 0) {
+      this.words[0] = 0;
+      this.length = 1;
+    }
+
+    return this._strip();
+  };
+
+  BN.prototype.ishrn = function ishrn (bits, hint, extended) {
+    // TODO(indutny): implement me
+    assert(this.negative === 0);
+    return this.iushrn(bits, hint, extended);
+  };
+
+  // Shift-left
+  BN.prototype.shln = function shln (bits) {
+    return this.clone().ishln(bits);
+  };
+
+  BN.prototype.ushln = function ushln (bits) {
+    return this.clone().iushln(bits);
+  };
+
+  // Shift-right
+  BN.prototype.shrn = function shrn (bits) {
+    return this.clone().ishrn(bits);
+  };
+
+  BN.prototype.ushrn = function ushrn (bits) {
+    return this.clone().iushrn(bits);
+  };
+
+  // Test if n bit is set
+  BN.prototype.testn = function testn (bit) {
+    assert(typeof bit === 'number' && bit >= 0);
+    var r = bit % 26;
+    var s = (bit - r) / 26;
+    var q = 1 << r;
+
+    // Fast case: bit is much higher than all existing words
+    if (this.length <= s) return false;
+
+    // Check bit and return
+    var w = this.words[s];
+
+    return !!(w & q);
+  };
+
+  // Return only lowers bits of number (in-place)
+  BN.prototype.imaskn = function imaskn (bits) {
+    assert(typeof bits === 'number' && bits >= 0);
+    var r = bits % 26;
+    var s = (bits - r) / 26;
+
+    assert(this.negative === 0, 'imaskn works only with positive numbers');
+
+    if (this.length <= s) {
+      return this;
+    }
+
+    if (r !== 0) {
+      s++;
+    }
+    this.length = Math.min(s, this.length);
+
+    if (r !== 0) {
+      var mask = 0x3ffffff ^ ((0x3ffffff >>> r) << r);
+      this.words[this.length - 1] &= mask;
+    }
+
+    return this._strip();
+  };
+
+  // Return only lowers bits of number
+  BN.prototype.maskn = function maskn (bits) {
+    return this.clone().imaskn(bits);
+  };
+
+  // Add plain number `num` to `this`
+  BN.prototype.iaddn = function iaddn (num) {
+    assert(typeof num === 'number');
+    assert(num < 0x4000000);
+    if (num < 0) return this.isubn(-num);
+
+    // Possible sign change
+    if (this.negative !== 0) {
+      if (this.length === 1 && (this.words[0] | 0) <= num) {
+        this.words[0] = num - (this.words[0] | 0);
+        this.negative = 0;
+        return this;
+      }
+
+      this.negative = 0;
+      this.isubn(num);
+      this.negative = 1;
+      return this;
+    }
+
+    // Add without checks
+    return this._iaddn(num);
+  };
+
+  BN.prototype._iaddn = function _iaddn (num) {
+    this.words[0] += num;
+
+    // Carry
+    for (var i = 0; i < this.length && this.words[i] >= 0x4000000; i++) {
+      this.words[i] -= 0x4000000;
+      if (i === this.length - 1) {
+        this.words[i + 1] = 1;
+      } else {
+        this.words[i + 1]++;
+      }
+    }
+    this.length = Math.max(this.length, i + 1);
+
+    return this;
+  };
+
+  // Subtract plain number `num` from `this`
+  BN.prototype.isubn = function isubn (num) {
+    assert(typeof num === 'number');
+    assert(num < 0x4000000);
+    if (num < 0) return this.iaddn(-num);
+
+    if (this.negative !== 0) {
+      this.negative = 0;
+      this.iaddn(num);
+      this.negative = 1;
+      return this;
+    }
+
+    this.words[0] -= num;
+
+    if (this.length === 1 && this.words[0] < 0) {
+      this.words[0] = -this.words[0];
+      this.negative = 1;
+    } else {
+      // Carry
+      for (var i = 0; i < this.length && this.words[i] < 0; i++) {
+        this.words[i] += 0x4000000;
+        this.words[i + 1] -= 1;
+      }
+    }
+
+    return this._strip();
+  };
+
+  BN.prototype.addn = function addn (num) {
+    return this.clone().iaddn(num);
+  };
+
+  BN.prototype.subn = function subn (num) {
+    return this.clone().isubn(num);
+  };
+
+  BN.prototype.iabs = function iabs () {
+    this.negative = 0;
+
+    return this;
+  };
+
+  BN.prototype.abs = function abs () {
+    return this.clone().iabs();
+  };
+
+  BN.prototype._ishlnsubmul = function _ishlnsubmul (num, mul, shift) {
+    var len = num.length + shift;
+    var i;
+
+    this._expand(len);
+
+    var w;
+    var carry = 0;
+    for (i = 0; i < num.length; i++) {
+      w = (this.words[i + shift] | 0) + carry;
+      var right = (num.words[i] | 0) * mul;
+      w -= right & 0x3ffffff;
+      carry = (w >> 26) - ((right / 0x4000000) | 0);
+      this.words[i + shift] = w & 0x3ffffff;
+    }
+    for (; i < this.length - shift; i++) {
+      w = (this.words[i + shift] | 0) + carry;
+      carry = w >> 26;
+      this.words[i + shift] = w & 0x3ffffff;
+    }
+
+    if (carry === 0) return this._strip();
+
+    // Subtraction overflow
+    assert(carry === -1);
+    carry = 0;
+    for (i = 0; i < this.length; i++) {
+      w = -(this.words[i] | 0) + carry;
+      carry = w >> 26;
+      this.words[i] = w & 0x3ffffff;
+    }
+    this.negative = 1;
+
+    return this._strip();
+  };
+
+  BN.prototype._wordDiv = function _wordDiv (num, mode) {
+    var shift = this.length - num.length;
+
+    var a = this.clone();
+    var b = num;
+
+    // Normalize
+    var bhi = b.words[b.length - 1] | 0;
+    var bhiBits = this._countBits(bhi);
+    shift = 26 - bhiBits;
+    if (shift !== 0) {
+      b = b.ushln(shift);
+      a.iushln(shift);
+      bhi = b.words[b.length - 1] | 0;
+    }
+
+    // Initialize quotient
+    var m = a.length - b.length;
+    var q;
+
+    if (mode !== 'mod') {
+      q = new BN(null);
+      q.length = m + 1;
+      q.words = new Array(q.length);
+      for (var i = 0; i < q.length; i++) {
+        q.words[i] = 0;
+      }
+    }
+
+    var diff = a.clone()._ishlnsubmul(b, 1, m);
+    if (diff.negative === 0) {
+      a = diff;
+      if (q) {
+        q.words[m] = 1;
+      }
+    }
+
+    for (var j = m - 1; j >= 0; j--) {
+      var qj = (a.words[b.length + j] | 0) * 0x4000000 +
+        (a.words[b.length + j - 1] | 0);
+
+      // NOTE: (qj / bhi) is (0x3ffffff * 0x4000000 + 0x3ffffff) / 0x2000000 max
+      // (0x7ffffff)
+      qj = Math.min((qj / bhi) | 0, 0x3ffffff);
+
+      a._ishlnsubmul(b, qj, j);
+      while (a.negative !== 0) {
+        qj--;
+        a.negative = 0;
+        a._ishlnsubmul(b, 1, j);
+        if (!a.isZero()) {
+          a.negative ^= 1;
+        }
+      }
+      if (q) {
+        q.words[j] = qj;
+      }
+    }
+    if (q) {
+      q._strip();
+    }
+    a._strip();
+
+    // Denormalize
+    if (mode !== 'div' && shift !== 0) {
+      a.iushrn(shift);
+    }
+
+    return {
+      div: q || null,
+      mod: a
+    };
+  };
+
+  // NOTE: 1) `mode` can be set to `mod` to request mod only,
+  //       to `div` to request div only, or be absent to
+  //       request both div & mod
+  //       2) `positive` is true if unsigned mod is requested
+  BN.prototype.divmod = function divmod (num, mode, positive) {
+    assert(!num.isZero());
+
+    if (this.isZero()) {
+      return {
+        div: new BN(0),
+        mod: new BN(0)
+      };
+    }
+
+    var div, mod, res;
+    if (this.negative !== 0 && num.negative === 0) {
+      res = this.neg().divmod(num, mode);
+
+      if (mode !== 'mod') {
+        div = res.div.neg();
+      }
+
+      if (mode !== 'div') {
+        mod = res.mod.neg();
+        if (positive && mod.negative !== 0) {
+          mod.iadd(num);
+        }
+      }
+
+      return {
+        div: div,
+        mod: mod
+      };
+    }
+
+    if (this.negative === 0 && num.negative !== 0) {
+      res = this.divmod(num.neg(), mode);
+
+      if (mode !== 'mod') {
+        div = res.div.neg();
+      }
+
+      return {
+        div: div,
+        mod: res.mod
+      };
+    }
+
+    if ((this.negative & num.negative) !== 0) {
+      res = this.neg().divmod(num.neg(), mode);
+
+      if (mode !== 'div') {
+        mod = res.mod.neg();
+        if (positive && mod.negative !== 0) {
+          mod.isub(num);
+        }
+      }
+
+      return {
+        div: res.div,
+        mod: mod
+      };
+    }
+
+    // Both numbers are positive at this point
+
+    // Strip both numbers to approximate shift value
+    if (num.length > this.length || this.cmp(num) < 0) {
+      return {
+        div: new BN(0),
+        mod: this
+      };
+    }
+
+    // Very short reduction
+    if (num.length === 1) {
+      if (mode === 'div') {
+        return {
+          div: this.divn(num.words[0]),
+          mod: null
+        };
+      }
+
+      if (mode === 'mod') {
+        return {
+          div: null,
+          mod: new BN(this.modrn(num.words[0]))
+        };
+      }
+
+      return {
+        div: this.divn(num.words[0]),
+        mod: new BN(this.modrn(num.words[0]))
+      };
+    }
+
+    return this._wordDiv(num, mode);
+  };
+
+  // Find `this` / `num`
+  BN.prototype.div = function div (num) {
+    return this.divmod(num, 'div', false).div;
+  };
+
+  // Find `this` % `num`
+  BN.prototype.mod = function mod (num) {
+    return this.divmod(num, 'mod', false).mod;
+  };
+
+  BN.prototype.umod = function umod (num) {
+    return this.divmod(num, 'mod', true).mod;
+  };
+
+  // Find Round(`this` / `num`)
+  BN.prototype.divRound = function divRound (num) {
+    var dm = this.divmod(num);
+
+    // Fast case - exact division
+    if (dm.mod.isZero()) return dm.div;
+
+    var mod = dm.div.negative !== 0 ? dm.mod.isub(num) : dm.mod;
+
+    var half = num.ushrn(1);
+    var r2 = num.andln(1);
+    var cmp = mod.cmp(half);
+
+    // Round down
+    if (cmp < 0 || (r2 === 1 && cmp === 0)) return dm.div;
+
+    // Round up
+    return dm.div.negative !== 0 ? dm.div.isubn(1) : dm.div.iaddn(1);
+  };
+
+  BN.prototype.modrn = function modrn (num) {
+    var isNegNum = num < 0;
+    if (isNegNum) num = -num;
+
+    assert(num <= 0x3ffffff);
+    var p = (1 << 26) % num;
+
+    var acc = 0;
+    for (var i = this.length - 1; i >= 0; i--) {
+      acc = (p * acc + (this.words[i] | 0)) % num;
+    }
+
+    return isNegNum ? -acc : acc;
+  };
+
+  // WARNING: DEPRECATED
+  BN.prototype.modn = function modn (num) {
+    return this.modrn(num);
+  };
+
+  // In-place division by number
+  BN.prototype.idivn = function idivn (num) {
+    var isNegNum = num < 0;
+    if (isNegNum) num = -num;
+
+    assert(num <= 0x3ffffff);
+
+    var carry = 0;
+    for (var i = this.length - 1; i >= 0; i--) {
+      var w = (this.words[i] | 0) + carry * 0x4000000;
+      this.words[i] = (w / num) | 0;
+      carry = w % num;
+    }
+
+    this._strip();
+    return isNegNum ? this.ineg() : this;
+  };
+
+  BN.prototype.divn = function divn (num) {
+    return this.clone().idivn(num);
+  };
+
+  BN.prototype.egcd = function egcd (p) {
+    assert(p.negative === 0);
+    assert(!p.isZero());
+
+    var x = this;
+    var y = p.clone();
+
+    if (x.negative !== 0) {
+      x = x.umod(p);
+    } else {
+      x = x.clone();
+    }
+
+    // A * x + B * y = x
+    var A = new BN(1);
+    var B = new BN(0);
+
+    // C * x + D * y = y
+    var C = new BN(0);
+    var D = new BN(1);
+
+    var g = 0;
+
+    while (x.isEven() && y.isEven()) {
+      x.iushrn(1);
+      y.iushrn(1);
+      ++g;
+    }
+
+    var yp = y.clone();
+    var xp = x.clone();
+
+    while (!x.isZero()) {
+      for (var i = 0, im = 1; (x.words[0] & im) === 0 && i < 26; ++i, im <<= 1);
+      if (i > 0) {
+        x.iushrn(i);
+        while (i-- > 0) {
+          if (A.isOdd() || B.isOdd()) {
+            A.iadd(yp);
+            B.isub(xp);
+          }
+
+          A.iushrn(1);
+          B.iushrn(1);
+        }
+      }
+
+      for (var j = 0, jm = 1; (y.words[0] & jm) === 0 && j < 26; ++j, jm <<= 1);
+      if (j > 0) {
+        y.iushrn(j);
+        while (j-- > 0) {
+          if (C.isOdd() || D.isOdd()) {
+            C.iadd(yp);
+            D.isub(xp);
+          }
+
+          C.iushrn(1);
+          D.iushrn(1);
+        }
+      }
+
+      if (x.cmp(y) >= 0) {
+        x.isub(y);
+        A.isub(C);
+        B.isub(D);
+      } else {
+        y.isub(x);
+        C.isub(A);
+        D.isub(B);
+      }
+    }
+
+    return {
+      a: C,
+      b: D,
+      gcd: y.iushln(g)
+    };
+  };
+
+  // This is reduced incarnation of the binary EEA
+  // above, designated to invert members of the
+  // _prime_ fields F(p) at a maximal speed
+  BN.prototype._invmp = function _invmp (p) {
+    assert(p.negative === 0);
+    assert(!p.isZero());
+
+    var a = this;
+    var b = p.clone();
+
+    if (a.negative !== 0) {
+      a = a.umod(p);
+    } else {
+      a = a.clone();
+    }
+
+    var x1 = new BN(1);
+    var x2 = new BN(0);
+
+    var delta = b.clone();
+
+    while (a.cmpn(1) > 0 && b.cmpn(1) > 0) {
+      for (var i = 0, im = 1; (a.words[0] & im) === 0 && i < 26; ++i, im <<= 1);
+      if (i > 0) {
+        a.iushrn(i);
+        while (i-- > 0) {
+          if (x1.isOdd()) {
+            x1.iadd(delta);
+          }
+
+          x1.iushrn(1);
+        }
+      }
+
+      for (var j = 0, jm = 1; (b.words[0] & jm) === 0 && j < 26; ++j, jm <<= 1);
+      if (j > 0) {
+        b.iushrn(j);
+        while (j-- > 0) {
+          if (x2.isOdd()) {
+            x2.iadd(delta);
+          }
+
+          x2.iushrn(1);
+        }
+      }
+
+      if (a.cmp(b) >= 0) {
+        a.isub(b);
+        x1.isub(x2);
+      } else {
+        b.isub(a);
+        x2.isub(x1);
+      }
+    }
+
+    var res;
+    if (a.cmpn(1) === 0) {
+      res = x1;
+    } else {
+      res = x2;
+    }
+
+    if (res.cmpn(0) < 0) {
+      res.iadd(p);
+    }
+
+    return res;
+  };
+
+  BN.prototype.gcd = function gcd (num) {
+    if (this.isZero()) return num.abs();
+    if (num.isZero()) return this.abs();
+
+    var a = this.clone();
+    var b = num.clone();
+    a.negative = 0;
+    b.negative = 0;
+
+    // Remove common factor of two
+    for (var shift = 0; a.isEven() && b.isEven(); shift++) {
+      a.iushrn(1);
+      b.iushrn(1);
+    }
+
+    do {
+      while (a.isEven()) {
+        a.iushrn(1);
+      }
+      while (b.isEven()) {
+        b.iushrn(1);
+      }
+
+      var r = a.cmp(b);
+      if (r < 0) {
+        // Swap `a` and `b` to make `a` always bigger than `b`
+        var t = a;
+        a = b;
+        b = t;
+      } else if (r === 0 || b.cmpn(1) === 0) {
+        break;
+      }
+
+      a.isub(b);
+    } while (true);
+
+    return b.iushln(shift);
+  };
+
+  // Invert number in the field F(num)
+  BN.prototype.invm = function invm (num) {
+    return this.egcd(num).a.umod(num);
+  };
+
+  BN.prototype.isEven = function isEven () {
+    return (this.words[0] & 1) === 0;
+  };
+
+  BN.prototype.isOdd = function isOdd () {
+    return (this.words[0] & 1) === 1;
+  };
+
+  // And first word and num
+  BN.prototype.andln = function andln (num) {
+    return this.words[0] & num;
+  };
+
+  // Increment at the bit position in-line
+  BN.prototype.bincn = function bincn (bit) {
+    assert(typeof bit === 'number');
+    var r = bit % 26;
+    var s = (bit - r) / 26;
+    var q = 1 << r;
+
+    // Fast case: bit is much higher than all existing words
+    if (this.length <= s) {
+      this._expand(s + 1);
+      this.words[s] |= q;
+      return this;
+    }
+
+    // Add bit and propagate, if needed
+    var carry = q;
+    for (var i = s; carry !== 0 && i < this.length; i++) {
+      var w = this.words[i] | 0;
+      w += carry;
+      carry = w >>> 26;
+      w &= 0x3ffffff;
+      this.words[i] = w;
+    }
+    if (carry !== 0) {
+      this.words[i] = carry;
+      this.length++;
+    }
+    return this;
+  };
+
+  BN.prototype.isZero = function isZero () {
+    return this.length === 1 && this.words[0] === 0;
+  };
+
+  BN.prototype.cmpn = function cmpn (num) {
+    var negative = num < 0;
+
+    if (this.negative !== 0 && !negative) return -1;
+    if (this.negative === 0 && negative) return 1;
+
+    this._strip();
+
+    var res;
+    if (this.length > 1) {
+      res = 1;
+    } else {
+      if (negative) {
+        num = -num;
+      }
+
+      assert(num <= 0x3ffffff, 'Number is too big');
+
+      var w = this.words[0] | 0;
+      res = w === num ? 0 : w < num ? -1 : 1;
+    }
+    if (this.negative !== 0) return -res | 0;
+    return res;
+  };
+
+  // Compare two numbers and return:
+  // 1 - if `this` > `num`
+  // 0 - if `this` == `num`
+  // -1 - if `this` < `num`
+  BN.prototype.cmp = function cmp (num) {
+    if (this.negative !== 0 && num.negative === 0) return -1;
+    if (this.negative === 0 && num.negative !== 0) return 1;
+
+    var res = this.ucmp(num);
+    if (this.negative !== 0) return -res | 0;
+    return res;
+  };
+
+  // Unsigned comparison
+  BN.prototype.ucmp = function ucmp (num) {
+    // At this point both numbers have the same sign
+    if (this.length > num.length) return 1;
+    if (this.length < num.length) return -1;
+
+    var res = 0;
+    for (var i = this.length - 1; i >= 0; i--) {
+      var a = this.words[i] | 0;
+      var b = num.words[i] | 0;
+
+      if (a === b) continue;
+      if (a < b) {
+        res = -1;
+      } else if (a > b) {
+        res = 1;
+      }
+      break;
+    }
+    return res;
+  };
+
+  BN.prototype.gtn = function gtn (num) {
+    return this.cmpn(num) === 1;
+  };
+
+  BN.prototype.gt = function gt (num) {
+    return this.cmp(num) === 1;
+  };
+
+  BN.prototype.gten = function gten (num) {
+    return this.cmpn(num) >= 0;
+  };
+
+  BN.prototype.gte = function gte (num) {
+    return this.cmp(num) >= 0;
+  };
+
+  BN.prototype.ltn = function ltn (num) {
+    return this.cmpn(num) === -1;
+  };
+
+  BN.prototype.lt = function lt (num) {
+    return this.cmp(num) === -1;
+  };
+
+  BN.prototype.lten = function lten (num) {
+    return this.cmpn(num) <= 0;
+  };
+
+  BN.prototype.lte = function lte (num) {
+    return this.cmp(num) <= 0;
+  };
+
+  BN.prototype.eqn = function eqn (num) {
+    return this.cmpn(num) === 0;
+  };
+
+  BN.prototype.eq = function eq (num) {
+    return this.cmp(num) === 0;
+  };
+
+  //
+  // A reduce context, could be using montgomery or something better, depending
+  // on the `m` itself.
+  //
+  BN.red = function red (num) {
+    return new Red(num);
+  };
+
+  BN.prototype.toRed = function toRed (ctx) {
+    assert(!this.red, 'Already a number in reduction context');
+    assert(this.negative === 0, 'red works only with positives');
+    return ctx.convertTo(this)._forceRed(ctx);
+  };
+
+  BN.prototype.fromRed = function fromRed () {
+    assert(this.red, 'fromRed works only with numbers in reduction context');
+    return this.red.convertFrom(this);
+  };
+
+  BN.prototype._forceRed = function _forceRed (ctx) {
+    this.red = ctx;
+    return this;
+  };
+
+  BN.prototype.forceRed = function forceRed (ctx) {
+    assert(!this.red, 'Already a number in reduction context');
+    return this._forceRed(ctx);
+  };
+
+  BN.prototype.redAdd = function redAdd (num) {
+    assert(this.red, 'redAdd works only with red numbers');
+    return this.red.add(this, num);
+  };
+
+  BN.prototype.redIAdd = function redIAdd (num) {
+    assert(this.red, 'redIAdd works only with red numbers');
+    return this.red.iadd(this, num);
+  };
+
+  BN.prototype.redSub = function redSub (num) {
+    assert(this.red, 'redSub works only with red numbers');
+    return this.red.sub(this, num);
+  };
+
+  BN.prototype.redISub = function redISub (num) {
+    assert(this.red, 'redISub works only with red numbers');
+    return this.red.isub(this, num);
+  };
+
+  BN.prototype.redShl = function redShl (num) {
+    assert(this.red, 'redShl works only with red numbers');
+    return this.red.shl(this, num);
+  };
+
+  BN.prototype.redMul = function redMul (num) {
+    assert(this.red, 'redMul works only with red numbers');
+    this.red._verify2(this, num);
+    return this.red.mul(this, num);
+  };
+
+  BN.prototype.redIMul = function redIMul (num) {
+    assert(this.red, 'redMul works only with red numbers');
+    this.red._verify2(this, num);
+    return this.red.imul(this, num);
+  };
+
+  BN.prototype.redSqr = function redSqr () {
+    assert(this.red, 'redSqr works only with red numbers');
+    this.red._verify1(this);
+    return this.red.sqr(this);
+  };
+
+  BN.prototype.redISqr = function redISqr () {
+    assert(this.red, 'redISqr works only with red numbers');
+    this.red._verify1(this);
+    return this.red.isqr(this);
+  };
+
+  // Square root over p
+  BN.prototype.redSqrt = function redSqrt () {
+    assert(this.red, 'redSqrt works only with red numbers');
+    this.red._verify1(this);
+    return this.red.sqrt(this);
+  };
+
+  BN.prototype.redInvm = function redInvm () {
+    assert(this.red, 'redInvm works only with red numbers');
+    this.red._verify1(this);
+    return this.red.invm(this);
+  };
+
+  // Return negative clone of `this` % `red modulo`
+  BN.prototype.redNeg = function redNeg () {
+    assert(this.red, 'redNeg works only with red numbers');
+    this.red._verify1(this);
+    return this.red.neg(this);
+  };
+
+  BN.prototype.redPow = function redPow (num) {
+    assert(this.red && !num.red, 'redPow(normalNum)');
+    this.red._verify1(this);
+    return this.red.pow(this, num);
+  };
+
+  // Prime numbers with efficient reduction
+  var primes = {
+    k256: null,
+    p224: null,
+    p192: null,
+    p25519: null
+  };
+
+  // Pseudo-Mersenne prime
+  function MPrime (name, p) {
+    // P = 2 ^ N - K
+    this.name = name;
+    this.p = new BN(p, 16);
+    this.n = this.p.bitLength();
+    this.k = new BN(1).iushln(this.n).isub(this.p);
+
+    this.tmp = this._tmp();
+  }
+
+  MPrime.prototype._tmp = function _tmp () {
+    var tmp = new BN(null);
+    tmp.words = new Array(Math.ceil(this.n / 13));
+    return tmp;
+  };
+
+  MPrime.prototype.ireduce = function ireduce (num) {
+    // Assumes that `num` is less than `P^2`
+    // num = HI * (2 ^ N - K) + HI * K + LO = HI * K + LO (mod P)
+    var r = num;
+    var rlen;
+
+    do {
+      this.split(r, this.tmp);
+      r = this.imulK(r);
+      r = r.iadd(this.tmp);
+      rlen = r.bitLength();
+    } while (rlen > this.n);
+
+    var cmp = rlen < this.n ? -1 : r.ucmp(this.p);
+    if (cmp === 0) {
+      r.words[0] = 0;
+      r.length = 1;
+    } else if (cmp > 0) {
+      r.isub(this.p);
+    } else {
+      if (r.strip !== undefined) {
+        // r is a BN v4 instance
+        r.strip();
+      } else {
+        // r is a BN v5 instance
+        r._strip();
+      }
+    }
+
+    return r;
+  };
+
+  MPrime.prototype.split = function split (input, out) {
+    input.iushrn(this.n, 0, out);
+  };
+
+  MPrime.prototype.imulK = function imulK (num) {
+    return num.imul(this.k);
+  };
+
+  function K256 () {
+    MPrime.call(
+      this,
+      'k256',
+      'ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff fffffffe fffffc2f');
+  }
+  inherits(K256, MPrime);
+
+  K256.prototype.split = function split (input, output) {
+    // 256 = 9 * 26 + 22
+    var mask = 0x3fffff;
+
+    var outLen = Math.min(input.length, 9);
+    for (var i = 0; i < outLen; i++) {
+      output.words[i] = input.words[i];
+    }
+    output.length = outLen;
+
+    if (input.length <= 9) {
+      input.words[0] = 0;
+      input.length = 1;
+      return;
+    }
+
+    // Shift by 9 limbs
+    var prev = input.words[9];
+    output.words[output.length++] = prev & mask;
+
+    for (i = 10; i < input.length; i++) {
+      var next = input.words[i] | 0;
+      input.words[i - 10] = ((next & mask) << 4) | (prev >>> 22);
+      prev = next;
+    }
+    prev >>>= 22;
+    input.words[i - 10] = prev;
+    if (prev === 0 && input.length > 10) {
+      input.length -= 10;
+    } else {
+      input.length -= 9;
+    }
+  };
+
+  K256.prototype.imulK = function imulK (num) {
+    // K = 0x1000003d1 = [ 0x40, 0x3d1 ]
+    num.words[num.length] = 0;
+    num.words[num.length + 1] = 0;
+    num.length += 2;
+
+    // bounded at: 0x40 * 0x3ffffff + 0x3d0 = 0x100000390
+    var lo = 0;
+    for (var i = 0; i < num.length; i++) {
+      var w = num.words[i] | 0;
+      lo += w * 0x3d1;
+      num.words[i] = lo & 0x3ffffff;
+      lo = w * 0x40 + ((lo / 0x4000000) | 0);
+    }
+
+    // Fast length reduction
+    if (num.words[num.length - 1] === 0) {
+      num.length--;
+      if (num.words[num.length - 1] === 0) {
+        num.length--;
+      }
+    }
+    return num;
+  };
+
+  function P224 () {
+    MPrime.call(
+      this,
+      'p224',
+      'ffffffff ffffffff ffffffff ffffffff 00000000 00000000 00000001');
+  }
+  inherits(P224, MPrime);
+
+  function P192 () {
+    MPrime.call(
+      this,
+      'p192',
+      'ffffffff ffffffff ffffffff fffffffe ffffffff ffffffff');
+  }
+  inherits(P192, MPrime);
+
+  function P25519 () {
+    // 2 ^ 255 - 19
+    MPrime.call(
+      this,
+      '25519',
+      '7fffffffffffffff ffffffffffffffff ffffffffffffffff ffffffffffffffed');
+  }
+  inherits(P25519, MPrime);
+
+  P25519.prototype.imulK = function imulK (num) {
+    // K = 0x13
+    var carry = 0;
+    for (var i = 0; i < num.length; i++) {
+      var hi = (num.words[i] | 0) * 0x13 + carry;
+      var lo = hi & 0x3ffffff;
+      hi >>>= 26;
+
+      num.words[i] = lo;
+      carry = hi;
+    }
+    if (carry !== 0) {
+      num.words[num.length++] = carry;
+    }
+    return num;
+  };
+
+  // Exported mostly for testing purposes, use plain name instead
+  BN._prime = function prime (name) {
+    // Cached version of prime
+    if (primes[name]) return primes[name];
+
+    var prime;
+    if (name === 'k256') {
+      prime = new K256();
+    } else if (name === 'p224') {
+      prime = new P224();
+    } else if (name === 'p192') {
+      prime = new P192();
+    } else if (name === 'p25519') {
+      prime = new P25519();
+    } else {
+      throw new Error('Unknown prime ' + name);
+    }
+    primes[name] = prime;
+
+    return prime;
+  };
+
+  //
+  // Base reduction engine
+  //
+  function Red (m) {
+    if (typeof m === 'string') {
+      var prime = BN._prime(m);
+      this.m = prime.p;
+      this.prime = prime;
+    } else {
+      assert(m.gtn(1), 'modulus must be greater than 1');
+      this.m = m;
+      this.prime = null;
+    }
+  }
+
+  Red.prototype._verify1 = function _verify1 (a) {
+    assert(a.negative === 0, 'red works only with positives');
+    assert(a.red, 'red works only with red numbers');
+  };
+
+  Red.prototype._verify2 = function _verify2 (a, b) {
+    assert((a.negative | b.negative) === 0, 'red works only with positives');
+    assert(a.red && a.red === b.red,
+      'red works only with red numbers');
+  };
+
+  Red.prototype.imod = function imod (a) {
+    if (this.prime) return this.prime.ireduce(a)._forceRed(this);
+
+    move(a, a.umod(this.m)._forceRed(this));
+    return a;
+  };
+
+  Red.prototype.neg = function neg (a) {
+    if (a.isZero()) {
+      return a.clone();
+    }
+
+    return this.m.sub(a)._forceRed(this);
+  };
+
+  Red.prototype.add = function add (a, b) {
+    this._verify2(a, b);
+
+    var res = a.add(b);
+    if (res.cmp(this.m) >= 0) {
+      res.isub(this.m);
+    }
+    return res._forceRed(this);
+  };
+
+  Red.prototype.iadd = function iadd (a, b) {
+    this._verify2(a, b);
+
+    var res = a.iadd(b);
+    if (res.cmp(this.m) >= 0) {
+      res.isub(this.m);
+    }
+    return res;
+  };
+
+  Red.prototype.sub = function sub (a, b) {
+    this._verify2(a, b);
+
+    var res = a.sub(b);
+    if (res.cmpn(0) < 0) {
+      res.iadd(this.m);
+    }
+    return res._forceRed(this);
+  };
+
+  Red.prototype.isub = function isub (a, b) {
+    this._verify2(a, b);
+
+    var res = a.isub(b);
+    if (res.cmpn(0) < 0) {
+      res.iadd(this.m);
+    }
+    return res;
+  };
+
+  Red.prototype.shl = function shl (a, num) {
+    this._verify1(a);
+    return this.imod(a.ushln(num));
+  };
+
+  Red.prototype.imul = function imul (a, b) {
+    this._verify2(a, b);
+    return this.imod(a.imul(b));
+  };
+
+  Red.prototype.mul = function mul (a, b) {
+    this._verify2(a, b);
+    return this.imod(a.mul(b));
+  };
+
+  Red.prototype.isqr = function isqr (a) {
+    return this.imul(a, a.clone());
+  };
+
+  Red.prototype.sqr = function sqr (a) {
+    return this.mul(a, a);
+  };
+
+  Red.prototype.sqrt = function sqrt (a) {
+    if (a.isZero()) return a.clone();
+
+    var mod3 = this.m.andln(3);
+    assert(mod3 % 2 === 1);
+
+    // Fast case
+    if (mod3 === 3) {
+      var pow = this.m.add(new BN(1)).iushrn(2);
+      return this.pow(a, pow);
+    }
+
+    // Tonelli-Shanks algorithm (Totally unoptimized and slow)
+    //
+    // Find Q and S, that Q * 2 ^ S = (P - 1)
+    var q = this.m.subn(1);
+    var s = 0;
+    while (!q.isZero() && q.andln(1) === 0) {
+      s++;
+      q.iushrn(1);
+    }
+    assert(!q.isZero());
+
+    var one = new BN(1).toRed(this);
+    var nOne = one.redNeg();
+
+    // Find quadratic non-residue
+    // NOTE: Max is such because of generalized Riemann hypothesis.
+    var lpow = this.m.subn(1).iushrn(1);
+    var z = this.m.bitLength();
+    z = new BN(2 * z * z).toRed(this);
+
+    while (this.pow(z, lpow).cmp(nOne) !== 0) {
+      z.redIAdd(nOne);
+    }
+
+    var c = this.pow(z, q);
+    var r = this.pow(a, q.addn(1).iushrn(1));
+    var t = this.pow(a, q);
+    var m = s;
+    while (t.cmp(one) !== 0) {
+      var tmp = t;
+      for (var i = 0; tmp.cmp(one) !== 0; i++) {
+        tmp = tmp.redSqr();
+      }
+      assert(i < m);
+      var b = this.pow(c, new BN(1).iushln(m - i - 1));
+
+      r = r.redMul(b);
+      c = b.redSqr();
+      t = t.redMul(c);
+      m = i;
+    }
+
+    return r;
+  };
+
+  Red.prototype.invm = function invm (a) {
+    var inv = a._invmp(this.m);
+    if (inv.negative !== 0) {
+      inv.negative = 0;
+      return this.imod(inv).redNeg();
+    } else {
+      return this.imod(inv);
+    }
+  };
+
+  Red.prototype.pow = function pow (a, num) {
+    if (num.isZero()) return new BN(1).toRed(this);
+    if (num.cmpn(1) === 0) return a.clone();
+
+    var windowSize = 4;
+    var wnd = new Array(1 << windowSize);
+    wnd[0] = new BN(1).toRed(this);
+    wnd[1] = a;
+    for (var i = 2; i < wnd.length; i++) {
+      wnd[i] = this.mul(wnd[i - 1], a);
+    }
+
+    var res = wnd[0];
+    var current = 0;
+    var currentLen = 0;
+    var start = num.bitLength() % 26;
+    if (start === 0) {
+      start = 26;
+    }
+
+    for (i = num.length - 1; i >= 0; i--) {
+      var word = num.words[i];
+      for (var j = start - 1; j >= 0; j--) {
+        var bit = (word >> j) & 1;
+        if (res !== wnd[0]) {
+          res = this.sqr(res);
+        }
+
+        if (bit === 0 && current === 0) {
+          currentLen = 0;
+          continue;
+        }
+
+        current <<= 1;
+        current |= bit;
+        currentLen++;
+        if (currentLen !== windowSize && (i !== 0 || j !== 0)) continue;
+
+        res = this.mul(res, wnd[current]);
+        currentLen = 0;
+        current = 0;
+      }
+      start = 26;
+    }
+
+    return res;
+  };
+
+  Red.prototype.convertTo = function convertTo (num) {
+    var r = num.umod(this.m);
+
+    return r === num ? r.clone() : r;
+  };
+
+  Red.prototype.convertFrom = function convertFrom (num) {
+    var res = num.clone();
+    res.red = null;
+    return res;
+  };
+
+  //
+  // Montgomery method engine
+  //
+
+  BN.mont = function mont (num) {
+    return new Mont(num);
+  };
+
+  function Mont (m) {
+    Red.call(this, m);
+
+    this.shift = this.m.bitLength();
+    if (this.shift % 26 !== 0) {
+      this.shift += 26 - (this.shift % 26);
+    }
+
+    this.r = new BN(1).iushln(this.shift);
+    this.r2 = this.imod(this.r.sqr());
+    this.rinv = this.r._invmp(this.m);
+
+    this.minv = this.rinv.mul(this.r).isubn(1).div(this.m);
+    this.minv = this.minv.umod(this.r);
+    this.minv = this.r.sub(this.minv);
+  }
+  inherits(Mont, Red);
+
+  Mont.prototype.convertTo = function convertTo (num) {
+    return this.imod(num.ushln(this.shift));
+  };
+
+  Mont.prototype.convertFrom = function convertFrom (num) {
+    var r = this.imod(num.mul(this.rinv));
+    r.red = null;
+    return r;
+  };
+
+  Mont.prototype.imul = function imul (a, b) {
+    if (a.isZero() || b.isZero()) {
+      a.words[0] = 0;
+      a.length = 1;
+      return a;
+    }
+
+    var t = a.imul(b);
+    var c = t.maskn(this.shift).mul(this.minv).imaskn(this.shift).mul(this.m);
+    var u = t.isub(c).iushrn(this.shift);
+    var res = u;
+
+    if (u.cmp(this.m) >= 0) {
+      res = u.isub(this.m);
+    } else if (u.cmpn(0) < 0) {
+      res = u.iadd(this.m);
+    }
+
+    return res._forceRed(this);
+  };
+
+  Mont.prototype.mul = function mul (a, b) {
+    if (a.isZero() || b.isZero()) return new BN(0)._forceRed(this);
+
+    var t = a.mul(b);
+    var c = t.maskn(this.shift).mul(this.minv).imaskn(this.shift).mul(this.m);
+    var u = t.isub(c).iushrn(this.shift);
+    var res = u;
+    if (u.cmp(this.m) >= 0) {
+      res = u.isub(this.m);
+    } else if (u.cmpn(0) < 0) {
+      res = u.iadd(this.m);
+    }
+
+    return res._forceRed(this);
+  };
+
+  Mont.prototype.invm = function invm (a) {
+    // (AR)^-1 * R^2 = (A^-1 * R^-1) * R^2 = A^-1 * R
+    var res = this.imod(a._invmp(this.m).mul(this.r2));
+    return res._forceRed(this);
+  };
+})(typeof module === 'undefined' || module, this);
+
+},{"buffer":134}],34:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "bytes/5.5.0";
+exports.version = "bytes/5.7.0";
 
-},{}],33:[function(require,module,exports){
+},{}],35:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.joinSignature = exports.splitSignature = exports.hexZeroPad = exports.hexStripZeros = exports.hexValue = exports.hexConcat = exports.hexDataSlice = exports.hexDataLength = exports.hexlify = exports.isHexString = exports.zeroPad = exports.stripZeros = exports.concat = exports.arrayify = exports.isBytes = exports.isBytesLike = void 0;
@@ -4670,7 +9373,7 @@ function arrayify(value, options) {
         var hex = value.substring(2);
         if (hex.length % 2) {
             if (options.hexPad === "left") {
-                hex = "0x0" + hex.substring(2);
+                hex = "0" + hex;
             }
             else if (options.hexPad === "right") {
                 hex += "0";
@@ -4882,17 +9585,28 @@ function splitSignature(signature) {
         s: "0x",
         _vs: "0x",
         recoveryParam: 0,
-        v: 0
+        v: 0,
+        yParityAndS: "0x",
+        compact: "0x"
     };
     if (isBytesLike(signature)) {
         var bytes = arrayify(signature);
-        if (bytes.length !== 65) {
-            logger.throwArgumentError("invalid signature string; must be 65 bytes", "signature", signature);
-        }
         // Get the r, s and v
-        result.r = hexlify(bytes.slice(0, 32));
-        result.s = hexlify(bytes.slice(32, 64));
-        result.v = bytes[64];
+        if (bytes.length === 64) {
+            // EIP-2098; pull the v from the top bit of s and clear it
+            result.v = 27 + (bytes[32] >> 7);
+            bytes[32] &= 0x7f;
+            result.r = hexlify(bytes.slice(0, 32));
+            result.s = hexlify(bytes.slice(32, 64));
+        }
+        else if (bytes.length === 65) {
+            result.r = hexlify(bytes.slice(0, 32));
+            result.s = hexlify(bytes.slice(32, 64));
+            result.v = bytes[64];
+        }
+        else {
+            logger.throwArgumentError("invalid signature string", "signature", signature);
+        }
         // Allow a recid to be used as the v
         if (result.v < 27) {
             if (result.v === 0 || result.v === 1) {
@@ -4996,6 +9710,8 @@ function splitSignature(signature) {
             logger.throwArgumentError("signature _vs mismatch v and s", "signature", signature);
         }
     }
+    result.yParityAndS = result._vs;
+    result.compact = result.r + result.yParityAndS.substring(2);
     return result;
 }
 exports.splitSignature = splitSignature;
@@ -5009,13 +9725,13 @@ function joinSignature(signature) {
 }
 exports.joinSignature = joinSignature;
 
-},{"./_version":32,"@ethersproject/logger":57}],34:[function(require,module,exports){
+},{"./_version":34,"@ethersproject/logger":62}],36:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AddressZero = void 0;
 exports.AddressZero = "0x0000000000000000000000000000000000000000";
 
-},{}],35:[function(require,module,exports){
+},{}],37:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MaxInt256 = exports.MinInt256 = exports.MaxUint256 = exports.WeiPerEther = exports.Two = exports.One = exports.Zero = exports.NegativeOne = void 0;
@@ -5037,13 +9753,13 @@ exports.MinInt256 = MinInt256;
 var MaxInt256 = ( /*#__PURE__*/bignumber_1.BigNumber.from("0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
 exports.MaxInt256 = MaxInt256;
 
-},{"@ethersproject/bignumber":31}],36:[function(require,module,exports){
+},{"@ethersproject/bignumber":32}],38:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.HashZero = void 0;
 exports.HashZero = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
-},{}],37:[function(require,module,exports){
+},{}],39:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EtherSymbol = exports.HashZero = exports.MaxInt256 = exports.MinInt256 = exports.MaxUint256 = exports.WeiPerEther = exports.Two = exports.One = exports.Zero = exports.NegativeOne = exports.AddressZero = void 0;
@@ -5063,20 +9779,20 @@ Object.defineProperty(exports, "HashZero", { enumerable: true, get: function () 
 var strings_1 = require("./strings");
 Object.defineProperty(exports, "EtherSymbol", { enumerable: true, get: function () { return strings_1.EtherSymbol; } });
 
-},{"./addresses":34,"./bignumbers":35,"./hashes":36,"./strings":38}],38:[function(require,module,exports){
+},{"./addresses":36,"./bignumbers":37,"./hashes":38,"./strings":40}],40:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EtherSymbol = void 0;
 // NFKC (composed)             // (decomposed)
 exports.EtherSymbol = "\u039e"; // "\uD835\uDF63";
 
-},{}],39:[function(require,module,exports){
+},{}],41:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "contracts/5.5.0";
+exports.version = "contracts/5.7.0";
 
-},{}],40:[function(require,module,exports){
+},{}],42:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -5158,7 +9874,8 @@ var allowedTransactionKeys = {
     chainId: true, data: true, from: true, gasLimit: true, gasPrice: true, nonce: true, to: true, value: true,
     type: true, accessList: true,
     maxFeePerGas: true, maxPriorityFeePerGas: true,
-    customData: true
+    customData: true,
+    ccipReadEnabled: true
 };
 function resolveName(resolver, nameOrPromise) {
     return __awaiter(this, void 0, void 0, function () {
@@ -5333,6 +10050,9 @@ function populateTransaction(contract, fragment, args) {
                     if (ro.customData) {
                         tx.customData = (0, properties_1.shallowCopy)(ro.customData);
                     }
+                    if (ro.ccipReadEnabled) {
+                        tx.ccipReadEnabled = !!ro.ccipReadEnabled;
+                    }
                     // Remove the overrides
                     delete overrides.nonce;
                     delete overrides.gasLimit;
@@ -5344,6 +10064,7 @@ function populateTransaction(contract, fragment, args) {
                     delete overrides.maxFeePerGas;
                     delete overrides.maxPriorityFeePerGas;
                     delete overrides.customData;
+                    delete overrides.ccipReadEnabled;
                     leftovers = Object.keys(overrides).filter(function (key) { return (overrides[key] != null); });
                     if (leftovers.length) {
                         logger.throwError("cannot override " + leftovers.map(function (l) { return JSON.stringify(l); }).join(","), logger_1.Logger.errors.UNSUPPORTED_OPERATION, {
@@ -5685,7 +10406,6 @@ var BaseContract = /** @class */ (function () {
     function BaseContract(addressOrName, contractInterface, signerOrProvider) {
         var _newTarget = this.constructor;
         var _this = this;
-        logger.checkNew(_newTarget, Contract);
         // @TODO: Maybe still check the addressOrName looks like a valid address or name?
         //address = getAddress(address);
         (0, properties_1.defineReadOnly)(this, "interface", (0, properties_1.getStatic)(_newTarget, "getInterface")(contractInterface));
@@ -5758,6 +10478,8 @@ var BaseContract = /** @class */ (function () {
                 });
             }
         }
+        // Swallow bad ENS names to prevent Unhandled Exceptions
+        this.resolvedAddress.catch(function (e) { });
         var uniqueNames = {};
         var uniqueSignatures = {};
         Object.keys(this.interface.functions).forEach(function (signature) {
@@ -6274,13 +10996,468 @@ var ContractFactory = /** @class */ (function () {
 }());
 exports.ContractFactory = ContractFactory;
 
-},{"./_version":39,"@ethersproject/abi":17,"@ethersproject/abstract-provider":20,"@ethersproject/abstract-signer":22,"@ethersproject/address":24,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/logger":57,"@ethersproject/properties":63,"@ethersproject/transactions":103}],41:[function(require,module,exports){
+},{"./_version":41,"@ethersproject/abi":18,"@ethersproject/abstract-provider":21,"@ethersproject/abstract-signer":23,"@ethersproject/address":25,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/logger":62,"@ethersproject/properties":68,"@ethersproject/transactions":109}],43:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "hash/5.5.0";
+exports.version = "hash/5.7.0";
 
-},{}],42:[function(require,module,exports){
+},{}],44:[function(require,module,exports){
+"use strict";
+/**
+ * MIT License
+ *
+ * Copyright (c) 2021 Andrew Raffensperger
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * This is a near carbon-copy of the original source (link below) with the
+ * TypeScript typings added and a few tweaks to make it ES3-compatible.
+ *
+ * See: https://github.com/adraffy/ens-normalize.js
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.read_emoji_trie = exports.read_zero_terminated_array = exports.read_mapped_map = exports.read_member_array = exports.signed = exports.read_compressed_payload = exports.read_payload = exports.decode_arithmetic = void 0;
+// https://github.com/behnammodi/polyfill/blob/master/array.polyfill.js
+function flat(array, depth) {
+    if (depth == null) {
+        depth = 1;
+    }
+    var result = [];
+    var forEach = result.forEach;
+    var flatDeep = function (arr, depth) {
+        forEach.call(arr, function (val) {
+            if (depth > 0 && Array.isArray(val)) {
+                flatDeep(val, depth - 1);
+            }
+            else {
+                result.push(val);
+            }
+        });
+    };
+    flatDeep(array, depth);
+    return result;
+}
+function fromEntries(array) {
+    var result = {};
+    for (var i = 0; i < array.length; i++) {
+        var value = array[i];
+        result[value[0]] = value[1];
+    }
+    return result;
+}
+function decode_arithmetic(bytes) {
+    var pos = 0;
+    function u16() { return (bytes[pos++] << 8) | bytes[pos++]; }
+    // decode the frequency table
+    var symbol_count = u16();
+    var total = 1;
+    var acc = [0, 1]; // first symbol has frequency 1
+    for (var i = 1; i < symbol_count; i++) {
+        acc.push(total += u16());
+    }
+    // skip the sized-payload that the last 3 symbols index into
+    var skip = u16();
+    var pos_payload = pos;
+    pos += skip;
+    var read_width = 0;
+    var read_buffer = 0;
+    function read_bit() {
+        if (read_width == 0) {
+            // this will read beyond end of buffer
+            // but (undefined|0) => zero pad
+            read_buffer = (read_buffer << 8) | bytes[pos++];
+            read_width = 8;
+        }
+        return (read_buffer >> --read_width) & 1;
+    }
+    var N = 31;
+    var FULL = Math.pow(2, N);
+    var HALF = FULL >>> 1;
+    var QRTR = HALF >> 1;
+    var MASK = FULL - 1;
+    // fill register
+    var register = 0;
+    for (var i = 0; i < N; i++)
+        register = (register << 1) | read_bit();
+    var symbols = [];
+    var low = 0;
+    var range = FULL; // treat like a float
+    while (true) {
+        var value = Math.floor((((register - low + 1) * total) - 1) / range);
+        var start = 0;
+        var end = symbol_count;
+        while (end - start > 1) { // binary search
+            var mid = (start + end) >>> 1;
+            if (value < acc[mid]) {
+                end = mid;
+            }
+            else {
+                start = mid;
+            }
+        }
+        if (start == 0)
+            break; // first symbol is end mark
+        symbols.push(start);
+        var a = low + Math.floor(range * acc[start] / total);
+        var b = low + Math.floor(range * acc[start + 1] / total) - 1;
+        while (((a ^ b) & HALF) == 0) {
+            register = (register << 1) & MASK | read_bit();
+            a = (a << 1) & MASK;
+            b = (b << 1) & MASK | 1;
+        }
+        while (a & ~b & QRTR) {
+            register = (register & HALF) | ((register << 1) & (MASK >>> 1)) | read_bit();
+            a = (a << 1) ^ HALF;
+            b = ((b ^ HALF) << 1) | HALF | 1;
+        }
+        low = a;
+        range = 1 + b - a;
+    }
+    var offset = symbol_count - 4;
+    return symbols.map(function (x) {
+        switch (x - offset) {
+            case 3: return offset + 0x10100 + ((bytes[pos_payload++] << 16) | (bytes[pos_payload++] << 8) | bytes[pos_payload++]);
+            case 2: return offset + 0x100 + ((bytes[pos_payload++] << 8) | bytes[pos_payload++]);
+            case 1: return offset + bytes[pos_payload++];
+            default: return x - 1;
+        }
+    });
+}
+exports.decode_arithmetic = decode_arithmetic;
+// returns an iterator which returns the next symbol
+function read_payload(v) {
+    var pos = 0;
+    return function () { return v[pos++]; };
+}
+exports.read_payload = read_payload;
+function read_compressed_payload(bytes) {
+    return read_payload(decode_arithmetic(bytes));
+}
+exports.read_compressed_payload = read_compressed_payload;
+// eg. [0,1,2,3...] => [0,-1,1,-2,...]
+function signed(i) {
+    return (i & 1) ? (~i >> 1) : (i >> 1);
+}
+exports.signed = signed;
+function read_counts(n, next) {
+    var v = Array(n);
+    for (var i = 0; i < n; i++)
+        v[i] = 1 + next();
+    return v;
+}
+function read_ascending(n, next) {
+    var v = Array(n);
+    for (var i = 0, x = -1; i < n; i++)
+        v[i] = x += 1 + next();
+    return v;
+}
+function read_deltas(n, next) {
+    var v = Array(n);
+    for (var i = 0, x = 0; i < n; i++)
+        v[i] = x += signed(next());
+    return v;
+}
+function read_member_array(next, lookup) {
+    var v = read_ascending(next(), next);
+    var n = next();
+    var vX = read_ascending(n, next);
+    var vN = read_counts(n, next);
+    for (var i = 0; i < n; i++) {
+        for (var j = 0; j < vN[i]; j++) {
+            v.push(vX[i] + j);
+        }
+    }
+    return lookup ? v.map(function (x) { return lookup[x]; }) : v;
+}
+exports.read_member_array = read_member_array;
+// returns array of 
+// [x, ys] => single replacement rule
+// [x, ys, n, dx, dx] => linear map
+function read_mapped_map(next) {
+    var ret = [];
+    while (true) {
+        var w = next();
+        if (w == 0)
+            break;
+        ret.push(read_linear_table(w, next));
+    }
+    while (true) {
+        var w = next() - 1;
+        if (w < 0)
+            break;
+        ret.push(read_replacement_table(w, next));
+    }
+    return fromEntries(flat(ret));
+}
+exports.read_mapped_map = read_mapped_map;
+function read_zero_terminated_array(next) {
+    var v = [];
+    while (true) {
+        var i = next();
+        if (i == 0)
+            break;
+        v.push(i);
+    }
+    return v;
+}
+exports.read_zero_terminated_array = read_zero_terminated_array;
+function read_transposed(n, w, next) {
+    var m = Array(n).fill(undefined).map(function () { return []; });
+    for (var i = 0; i < w; i++) {
+        read_deltas(n, next).forEach(function (x, j) { return m[j].push(x); });
+    }
+    return m;
+}
+function read_linear_table(w, next) {
+    var dx = 1 + next();
+    var dy = next();
+    var vN = read_zero_terminated_array(next);
+    var m = read_transposed(vN.length, 1 + w, next);
+    return flat(m.map(function (v, i) {
+        var x = v[0], ys = v.slice(1);
+        //let [x, ...ys] = v;
+        //return Array(vN[i]).fill().map((_, j) => {
+        return Array(vN[i]).fill(undefined).map(function (_, j) {
+            var j_dy = j * dy;
+            return [x + j * dx, ys.map(function (y) { return y + j_dy; })];
+        });
+    }));
+}
+function read_replacement_table(w, next) {
+    var n = 1 + next();
+    var m = read_transposed(n, 1 + w, next);
+    return m.map(function (v) { return [v[0], v.slice(1)]; });
+}
+function read_emoji_trie(next) {
+    var sorted = read_member_array(next).sort(function (a, b) { return a - b; });
+    return read();
+    function read() {
+        var branches = [];
+        while (true) {
+            var keys = read_member_array(next, sorted);
+            if (keys.length == 0)
+                break;
+            branches.push({ set: new Set(keys), node: read() });
+        }
+        branches.sort(function (a, b) { return b.set.size - a.set.size; }); // sort by likelihood
+        var temp = next();
+        var valid = temp % 3;
+        temp = (temp / 3) | 0;
+        var fe0f = !!(temp & 1);
+        temp >>= 1;
+        var save = temp == 1;
+        var check = temp == 2;
+        return { branches: branches, valid: valid, fe0f: fe0f, save: save, check: check };
+    }
+}
+exports.read_emoji_trie = read_emoji_trie;
+
+},{}],45:[function(require,module,exports){
+"use strict";
+/**
+ * MIT License
+ *
+ * Copyright (c) 2021 Andrew Raffensperger
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * This is a near carbon-copy of the original source (link below) with the
+ * TypeScript typings added and a few tweaks to make it ES3-compatible.
+ *
+ * See: https://github.com/adraffy/ens-normalize.js
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getData = void 0;
+var base64_1 = require("@ethersproject/base64");
+var decoder_js_1 = require("./decoder.js");
+function getData() {
+    return (0, decoder_js_1.read_compressed_payload)((0, base64_1.decode)('AEQF2AO2DEsA2wIrAGsBRABxAN8AZwCcAEwAqgA0AGwAUgByADcATAAVAFYAIQAyACEAKAAYAFgAGwAjABQAMAAmADIAFAAfABQAKwATACoADgAbAA8AHQAYABoAGQAxADgALAAoADwAEwA9ABMAGgARAA4ADwAWABMAFgAIAA8AHgQXBYMA5BHJAS8JtAYoAe4AExozi0UAH21tAaMnBT8CrnIyhrMDhRgDygIBUAEHcoFHUPe8AXBjAewCjgDQR8IICIcEcQLwATXCDgzvHwBmBoHNAqsBdBcUAykgDhAMShskMgo8AY8jqAQfAUAfHw8BDw87MioGlCIPBwZCa4ELatMAAMspJVgsDl8AIhckSg8XAHdvTwBcIQEiDT4OPhUqbyECAEoAS34Aej8Ybx83JgT/Xw8gHxZ/7w8RICxPHA9vBw+Pfw8PHwAPFv+fAsAvCc8vEr8ivwD/EQ8Bol8OEBa/A78hrwAPCU8vESNvvwWfHwNfAVoDHr+ZAAED34YaAdJPAK7PLwSEgDLHAGo1Pz8Pvx9fUwMrpb8O/58VTzAPIBoXIyQJNF8hpwIVAT8YGAUADDNBaX3RAMomJCg9EhUeA29MABsZBTMNJipjOhc19gcIDR8bBwQHEggCWi6DIgLuAQYA+BAFCha3A5XiAEsqM7UFFgFLhAMjFTMYE1Klnw74nRVBG/ASCm0BYRN/BrsU3VoWy+S0vV8LQx+vN8gF2AC2AK5EAWwApgYDKmAAroQ0NDQ0AT+OCg7wAAIHRAbpNgVcBV0APTA5BfbPFgMLzcYL/QqqA82eBALKCjQCjqYCht0/k2+OAsXQAoP3ASTKDgDw6ACKAUYCMpIKJpRaAE4A5womABzZvs0REEKiACIQAd5QdAECAj4Ywg/wGqY2AVgAYADYvAoCGAEubA0gvAY2ALAAbpbvqpyEAGAEpgQAJgAG7gAgAEACmghUFwCqAMpAINQIwC4DthRAAPcycKgApoIdABwBfCisABoATwBqASIAvhnSBP8aH/ECeAKXAq40NjgDBTwFYQU6AXs3oABgAD4XNgmcCY1eCl5tIFZeUqGgyoNHABgAEQAaABNwWQAmABMATPMa3T34ADldyprmM1M2XociUQgLzvwAXT3xABgAEQAaABNwIGFAnADD8AAgAD4BBJWzaCcIAIEBFMAWwKoAAdq9BWAF5wLQpALEtQAKUSGkahR4GnJM+gsAwCgeFAiUAECQ0BQuL8AAIAAAADKeIheclvFqQAAETr4iAMxIARMgAMIoHhQIAn0E0pDQFC4HhznoAAAAIAI2C0/4lvFqQAAETgBJJwYCAy4ABgYAFAA8MBKYEH4eRhTkAjYeFcgACAYAeABsOqyQ5gRwDayqugEgaIIAtgoACgDmEABmBAWGme5OBJJA2m4cDeoAmITWAXwrMgOgAGwBCh6CBXYF1Tzg1wKAAFdiuABRAFwAXQBsAG8AdgBrAHYAbwCEAHEwfxQBVE5TEQADVFhTBwBDANILAqcCzgLTApQCrQL6vAAMAL8APLhNBKkE6glGKTAU4Dr4N2EYEwBCkABKk8rHAbYBmwIoAiU4Ajf/Aq4CowCAANIChzgaNBsCsTgeODcFXrgClQKdAqQBiQGYAqsCsjTsNHsfNPA0ixsAWTWiOAMFPDQSNCk2BDZHNow2TTZUNhk28Jk9VzI3QkEoAoICoQKwAqcAQAAxBV4FXbS9BW47YkIXP1ciUqs05DS/FwABUwJW11e6nHuYZmSh/RAYA8oMKvZ8KASoUAJYWAJ6ILAsAZSoqjpgA0ocBIhmDgDWAAawRDQoAAcuAj5iAHABZiR2AIgiHgCaAU68ACxuHAG0ygM8MiZIAlgBdF4GagJqAPZOHAMuBgoATkYAsABiAHgAMLoGDPj0HpKEBAAOJgAuALggTAHWAeAMEDbd20Uege0ADwAWADkAQgA9OHd+2MUQZBBhBgNNDkxxPxUQArEPqwvqERoM1irQ090ANK4H8ANYB/ADWANYB/AH8ANYB/ADWANYA1gDWBwP8B/YxRBkD00EcgWTBZAE2wiIJk4RhgctCNdUEnQjHEwDSgEBIypJITuYMxAlR0wRTQgIATZHbKx9PQNMMbBU+pCnA9AyVDlxBgMedhKlAC8PeCE1uk6DekxxpQpQT7NX9wBFBgASqwAS5gBJDSgAUCwGPQBI4zTYABNGAE2bAE3KAExdGABKaAbgAFBXAFCOAFBJABI2SWdObALDOq0//QomCZhvwHdTBkIQHCemEPgMNAG2ATwN7kvZBPIGPATKH34ZGg/OlZ0Ipi3eDO4m5C6igFsj9iqEBe5L9TzeC05RaQ9aC2YJ5DpkgU8DIgEOIowK3g06CG4Q9ArKbA3mEUYHOgPWSZsApgcCCxIdNhW2JhFirQsKOXgG/Br3C5AmsBMqev0F1BoiBk4BKhsAANAu6IWxWjJcHU9gBgQLJiPIFKlQIQ0mQLh4SRocBxYlqgKSQ3FKiFE3HpQh9zw+DWcuFFF9B/Y8BhlQC4I8n0asRQ8R0z6OPUkiSkwtBDaALDAnjAnQD4YMunxzAVoJIgmyDHITMhEYN8YIOgcaLpclJxYIIkaWYJsE+KAD9BPSAwwFQAlCBxQDthwuEy8VKgUOgSXYAvQ21i60ApBWgQEYBcwPJh/gEFFH4Q7qCJwCZgOEJewALhUiABginAhEZABgj9lTBi7MCMhqbSN1A2gU6GIRdAeSDlgHqBw0FcAc4nDJXgyGCSiksAlcAXYJmgFgBOQICjVcjKEgQmdUi1kYnCBiQUBd/QIyDGYVoES+h3kCjA9sEhwBNgF0BzoNAgJ4Ee4RbBCWCOyGBTW2M/k6JgRQIYQgEgooA1BszwsoJvoM+WoBpBJjAw00PnfvZ6xgtyUX/gcaMsZBYSHyC5NPzgydGsIYQ1QvGeUHwAP0GvQn60FYBgADpAQUOk4z7wS+C2oIjAlAAEoOpBgH2BhrCnKM0QEyjAG4mgNYkoQCcJAGOAcMAGgMiAV65gAeAqgIpAAGANADWAA6Aq4HngAaAIZCAT4DKDABIuYCkAOUCDLMAZYwAfQqBBzEDBYA+DhuSwLDsgKAa2ajBd5ZAo8CSjYBTiYEBk9IUgOwcuIA3ABMBhTgSAEWrEvMG+REAeBwLADIAPwABjYHBkIBzgH0bgC4AWALMgmjtLYBTuoqAIQAFmwB2AKKAN4ANgCA8gFUAE4FWvoF1AJQSgESMhksWGIBvAMgATQBDgB6BsyOpsoIIARuB9QCEBwV4gLvLwe2AgMi4BPOQsYCvd9WADIXUu5eZwqoCqdeaAC0YTQHMnM9UQAPH6k+yAdy/BZIiQImSwBQ5gBQQzSaNTFWSTYBpwGqKQK38AFtqwBI/wK37gK3rQK3sAK6280C0gK33AK3zxAAUEIAUD9SklKDArekArw5AEQAzAHCO147WTteO1k7XjtZO147WTteO1kDmChYI03AVU0oJqkKbV9GYewMpw3VRMk6ShPcYFJgMxPJLbgUwhXPJVcZPhq9JwYl5VUKDwUt1GYxCC00dhe9AEApaYNCY4ceMQpMHOhTklT5LRwAskujM7ANrRsWREEFSHXuYisWDwojAmSCAmJDXE6wXDchAqH4AmiZAmYKAp+FOBwMAmY8AmYnBG8EgAN/FAN+kzkHOXgYOYM6JCQCbB4CMjc4CwJtyAJtr/CLADRoRiwBaADfAOIASwYHmQyOAP8MwwAOtgJ3MAJ2o0ACeUxEAni7Hl3cRa9G9AJ8QAJ6yQJ9CgJ88UgBSH5kJQAsFklZSlwWGErNAtECAtDNSygDiFADh+dExpEzAvKiXQQDA69Lz0wuJgTQTU1NsAKLQAKK2cIcCB5EaAa4Ao44Ao5dQZiCAo7aAo5deVG1UzYLUtVUhgKT/AKTDQDqAB1VH1WwVdEHLBwplocy4nhnRTw6ApegAu+zWCKpAFomApaQApZ9nQCqWa1aCoJOADwClrYClk9cRVzSApnMApllXMtdCBoCnJw5wzqeApwXAp+cAp65iwAeEDIrEAKd8gKekwC2PmE1YfACntQCoG8BqgKeoCACnk+mY8lkKCYsAiewAiZ/AqD8AqBN2AKmMAKlzwKoAAB+AqfzaH1osgAESmodatICrOQCrK8CrWgCrQMCVx4CVd0CseLYAx9PbJgCsr4OArLpGGzhbWRtSWADJc4Ctl08QG6RAylGArhfArlIFgK5K3hwN3DiAr0aAy2zAzISAr6JcgMDM3ICvhtzI3NQAsPMAsMFc4N0TDZGdOEDPKgDPJsDPcACxX0CxkgCxhGKAshqUgLIRQLJUALJLwJkngLd03h6YniveSZL0QMYpGcDAmH1GfSVJXsMXpNevBICz2wCz20wTFTT9BSgAMeuAs90ASrrA04TfkwGAtwoAtuLAtJQA1JdA1NgAQIDVY2AikABzBfuYUZ2AILPg44C2sgC2d+EEYRKpz0DhqYAMANkD4ZyWvoAVgLfZgLeuXR4AuIw7RUB8zEoAfScAfLTiALr9ALpcXoAAur6AurlAPpIAboC7ooC652Wq5cEAu5AA4XhmHpw4XGiAvMEAGoDjheZlAL3FAORbwOSiAL3mQL52gL4Z5odmqy8OJsfA52EAv77ARwAOp8dn7QDBY4DpmsDptoA0sYDBmuhiaIGCgMMSgFgASACtgNGAJwEgLpoBgC8BGzAEowcggCEDC6kdjoAJAM0C5IKRoABZCgiAIzw3AYBLACkfng9ogigkgNmWAN6AEQCvrkEVqTGAwCsBRbAA+4iQkMCHR072jI2PTbUNsk2RjY5NvA23TZKNiU3EDcZN5I+RTxDRTBCJkK5VBYKFhZfwQCWygU3AJBRHpu+OytgNxa61A40GMsYjsn7BVwFXQVcBV0FaAVdBVwFXQVcBV0FXAVdBVwFXUsaCNyKAK4AAQUHBwKU7oICoW1e7jAEzgPxA+YDwgCkBFDAwADABKzAAOxFLhitA1UFTDeyPkM+bj51QkRCuwTQWWQ8X+0AWBYzsACNA8xwzAGm7EZ/QisoCTAbLDs6fnLfb8H2GccsbgFw13M1HAVkBW/Jxsm9CNRO8E8FDD0FBQw9FkcClOYCoMFegpDfADgcMiA2AJQACB8AsigKAIzIEAJKeBIApY5yPZQIAKQiHb4fvj5BKSRPQrZCOz0oXyxgOywfKAnGbgMClQaCAkILXgdeCD9IIGUgQj5fPoY+dT52Ao5CM0dAX9BTVG9SDzFwWTQAbxBzJF/lOEIQQglCCkKJIAls5AcClQICoKPMODEFxhi6KSAbiyfIRrMjtCgdWCAkPlFBIitCsEJRzAbMAV/OEyQzDg0OAQQEJ36i328/Mk9AybDJsQlq3tDRApUKAkFzXf1d/j9uALYP6hCoFgCTGD8kPsFKQiobrm0+zj0KSD8kPnVCRBwMDyJRTHFgMTJa5rwXQiQ2YfI/JD7BMEJEHGINTw4TOFlIRzwJO0icMQpyPyQ+wzJCRBv6DVgnKB01NgUKj2bwYzMqCoBkznBgEF+zYDIocwRIX+NgHj4HICNfh2C4CwdwFWpTG/lgUhYGAwRfv2Ts8mAaXzVgml/XYIJfuWC4HI1gUF9pYJZgMR6ilQHMAOwLAlDRefC0in4AXAEJA6PjCwc0IamOANMMCAECRQDFNRTZBgd+CwQlRA+r6+gLBDEFBnwUBXgKATIArwAGRAAHA3cDdAN2A3kDdwN9A3oDdQN7A30DfAN4A3oDfQAYEAAlAtYASwMAUAFsAHcKAHcAmgB3AHUAdQB2AHVu8UgAygDAAHcAdQB1AHYAdQALCgB3AAsAmgB3AAsCOwB3AAtu8UgAygDAAHgKAJoAdwB3AHUAdQB2AHUAeAB1AHUAdgB1bvFIAMoAwAALCgCaAHcACwB3AAsCOwB3AAtu8UgAygDAAH4ACwGgALcBpwC6AahdAu0COwLtbvFIAMoAwAALCgCaAu0ACwLtAAsCOwLtAAtu8UgAygDAA24ACwNvAAu0VsQAAzsAABCkjUIpAAsAUIusOggWcgMeBxVsGwL67U/2HlzmWOEeOgALASvuAAseAfpKUpnpGgYJDCIZM6YyARUE9ThqAD5iXQgnAJYJPnOzw0ZAEZxEKsIAkA4DhAHnTAIDxxUDK0lxCQlPYgIvIQVYJQBVqE1GakUAKGYiDToSBA1EtAYAXQJYAIF8GgMHRyAAIAjOe9YncekRAA0KACUrjwE7Ayc6AAYWAqaiKG4McEcqANoN3+Mg9TwCBhIkuCny+JwUQ29L008JluRxu3K+oAdqiHOqFH0AG5SUIfUJ5SxCGfxdipRzqTmT4V5Zb+r1Uo4Vm+NqSSEl2mNvR2JhIa8SpYO6ntdwFXHCWTCK8f2+Hxo7uiG3drDycAuKIMP5bhi06ACnqArH1rz4Rqg//lm6SgJGEVbF9xJHISaR6HxqxSnkw6shDnelHKNEfGUXSJRJ1GcsmtJw25xrZMDK9gXSm1/YMkdX4/6NKYOdtk/NQ3/NnDASjTc3fPjIjW/5sVfVObX2oTDWkr1dF9f3kxBsD3/3aQO8hPfRz+e0uEiJqt1161griu7gz8hDDwtpy+F+BWtefnKHZPAxcZoWbnznhJpy0e842j36bcNzGnIEusgGX0a8ZxsnjcSsPDZ09yZ36fCQbriHeQ72JRMILNl6ePPf2HWoVwgWAm1fb3V2sAY0+B6rAXqSwPBgseVmoqsBTSrm91+XasMYYySI8eeRxH3ZvHkMz3BQ5aJ3iUVbYPNM3/7emRtjlsMgv/9VyTsyt/mK+8fgWeT6SoFaclXqn42dAIsvAarF5vNNWHzKSkKQ/8Hfk5ZWK7r9yliOsooyBjRhfkHP4Q2DkWXQi6FG/9r/IwbmkV5T7JSopHKn1pJwm9tb5Ot0oyN1Z2mPpKXHTxx2nlK08fKk1hEYA8WgVVWL5lgx0iTv+KdojJeU23ZDjmiubXOxVXJKKi2Wjuh2HLZOFLiSC7Tls5SMh4f+Pj6xUSrNjFqLGehRNB8lC0QSLNmkJJx/wSG3MnjE9T1CkPwJI0wH2lfzwETIiVqUxg0dfu5q39Gt+hwdcxkhhNvQ4TyrBceof3Mhs/IxFci1HmHr4FMZgXEEczPiGCx0HRwzAqDq2j9AVm1kwN0mRVLWLylgtoPNapF5cY4Y1wJh/e0BBwZj44YgZrDNqvD/9Hv7GFYdUQeDJuQ3EWI4HaKqavU1XjC/n41kT4L79kqGq0kLhdTZvgP3TA3fS0ozVz+5piZsoOtIvBUFoMKbNcmBL6YxxaUAusHB38XrS8dQMnQwJfUUkpRoGr5AUeWicvBTzyK9g77+yCkf5PAysL7r/JjcZgrbvRpMW9iyaxZvKO6ceZN2EwIxKwVFPuvFuiEPGCoagbMo+SpydLrXqBzNCDGFCrO/rkcwa2xhokQZ5CdZ0AsU3JfSqJ6n5I14YA+P/uAgfhPU84Tlw7cEFfp7AEE8ey4sP12PTt4Cods1GRgDOB5xvyiR5m+Bx8O5nBCNctU8BevfV5A08x6RHd5jcwPTMDSZJOedIZ1cGQ704lxbAzqZOP05ZxaOghzSdvFBHYqomATARyAADK4elP8Ly3IrUZKfWh23Xy20uBUmLS4Pfagu9+oyVa2iPgqRP3F2CTUsvJ7+RYnN8fFZbU/HVvxvcFFDKkiTqV5UBZ3Gz54JAKByi9hkKMZJvuGgcSYXFmw08UyoQyVdfTD1/dMkCHXcTGAKeROgArsvmRrQTLUOXioOHGK2QkjHuoYFgXciZoTJd6Fs5q1QX1G+p/e26hYsEf7QZD1nnIyl/SFkNtYYmmBhpBrxl9WbY0YpHWRuw2Ll/tj9mD8P4snVzJl4F9J+1arVeTb9E5r2ILH04qStjxQNwn3m4YNqxmaNbLAqW2TN6LidwuJRqS+NXbtqxoeDXpxeGWmxzSkWxjkyCkX4NQRme6q5SAcC+M7+9ETfA/EwrzQajKakCwYyeunP6ZFlxU2oMEn1Pz31zeStW74G406ZJFCl1wAXIoUKkWotYEpOuXB1uVNxJ63dpJEqfxBeptwIHNrPz8BllZoIcBoXwgfJ+8VAUnVPvRvexnw0Ma/WiGYuJO5y8QTvEYBigFmhUxY5RqzE8OcywN/8m4UYrlaniJO75XQ6KSo9+tWHlu+hMi0UVdiKQp7NelnoZUzNaIyBPVeOwK6GNp+FfHuPOoyhaWuNvTYFkvxscMQWDh+zeFCFkgwbXftiV23ywJ4+uwRqmg9k3KzwIQpzppt8DBBOMbrqwQM5Gb05sEwdKzMiAqOloaA/lr0KA+1pr0/+HiWoiIjHA/wir2nIuS3PeU/ji3O6ZwoxcR1SZ9FhtLC5S0FIzFhbBWcGVP/KpxOPSiUoAdWUpqKH++6Scz507iCcxYI6rdMBICPJZea7OcmeFw5mObJSiqpjg2UoWNIs+cFhyDSt6geV5qgi3FunmwwDoGSMgerFOZGX1m0dMCYo5XOruxO063dwENK9DbnVM9wYFREzh4vyU1WYYJ/LRRp6oxgjqP/X5a8/4Af6p6NWkQferzBmXme0zY/4nwMJm/wd1tIqSwGz+E3xPEAOoZlJit3XddD7/BT1pllzOx+8bmQtANQ/S6fZexc6qi3W+Q2xcmXTUhuS5mpHQRvcxZUN0S5+PL9lXWUAaRZhEH8hTdAcuNMMCuVNKTEGtSUKNi3O6KhSaTzck8csZ2vWRZ+d7mW8c4IKwXIYd25S/zIftPkwPzufjEvOHWVD1m+FjpDVUTV0DGDuHj6QnaEwLu/dEgdLQOg9E1Sro9XHJ8ykLAwtPu+pxqKDuFexqON1sKQm7rwbE1E68UCfA/erovrTCG+DBSNg0l4goDQvZN6uNlbyLpcZAwj2UclycvLpIZMgv4yRlpb3YuMftozorbcGVHt/VeDV3+Fdf1TP0iuaCsPi2G4XeGhsyF1ubVDxkoJhmniQ0/jSg/eYML9KLfnCFgISWkp91eauR3IQvED0nAPXK+6hPCYs+n3+hCZbiskmVMG2da+0EsZPonUeIY8EbfusQXjsK/eFDaosbPjEfQS0RKG7yj5GG69M7MeO1HmiUYocgygJHL6M1qzUDDwUSmr99V7Sdr2F3JjQAJY+F0yH33Iv3+C9M38eML7gTgmNu/r2bUMiPvpYbZ6v1/IaESirBHNa7mPKn4dEmYg7v/+HQgPN1G79jBQ1+soydfDC2r+h2Bl/KIc5KjMK7OH6nb1jLsNf0EHVe2KBiE51ox636uyG6Lho0t3J34L5QY/ilE3mikaF4HKXG1mG1rCevT1Vv6GavltxoQe/bMrpZvRggnBxSEPEeEzkEdOxTnPXHVjUYdw8JYvjB/o7Eegc3Ma+NUxLLnsK0kJlinPmUHzHGtrk5+CAbVzFOBqpyy3QVUnzTDfC/0XD94/okH+OB+i7g9lolhWIjSnfIb+Eq43ZXOWmwvjyV/qqD+t0e+7mTEM74qP/Ozt8nmC7mRpyu63OB4KnUzFc074SqoyPUAgM+/TJGFo6T44EHnQU4X4z6qannVqgw/U7zCpwcmXV1AubIrvOmkKHazJAR55ePjp5tLBsN8vAqs3NAHdcEHOR2xQ0lsNAFzSUuxFQCFYvXLZJdOj9p4fNq6p0HBGUik2YzaI4xySy91KzhQ0+q1hjxvImRwPRf76tChlRkhRCi74NXZ9qUNeIwP+s5p+3m5nwPdNOHgSLD79n7O9m1n1uDHiMntq4nkYwV5OZ1ENbXxFd4PgrlvavZsyUO4MqYlqqn1O8W/I1dEZq5dXhrbETLaZIbC2Kj/Aa/QM+fqUOHdf0tXAQ1huZ3cmWECWSXy/43j35+Mvq9xws7JKseriZ1pEWKc8qlzNrGPUGcVgOa9cPJYIJsGnJTAUsEcDOEVULO5x0rXBijc1lgXEzQQKhROf8zIV82w8eswc78YX11KYLWQRcgHNJElBxfXr72lS2RBSl07qTKorO2uUDZr3sFhYsvnhLZn0A94KRzJ/7DEGIAhW5ZWFpL8gEwu1aLA9MuWZzNwl8Oze9Y+bX+v9gywRVnoB5I/8kXTXU3141yRLYrIOOz6SOnyHNy4SieqzkBXharjfjqq1q6tklaEbA8Qfm2DaIPs7OTq/nvJBjKfO2H9bH2cCMh1+5gspfycu8f/cuuRmtDjyqZ7uCIMyjdV3a+p3fqmXsRx4C8lujezIFHnQiVTXLXuI1XrwN3+siYYj2HHTvESUx8DlOTXpak9qFRK+L3mgJ1WsD7F4cu1aJoFoYQnu+wGDMOjJM3kiBQWHCcvhJ/HRdxodOQp45YZaOTA22Nb4XKCVxqkbwMYFhzYQYIAnCW8FW14uf98jhUG2zrKhQQ0q0CEq0t5nXyvUyvR8DvD69LU+g3i+HFWQMQ8PqZuHD+sNKAV0+M6EJC0szq7rEr7B5bQ8BcNHzvDMc9eqB5ZCQdTf80Obn4uzjwpYU7SISdtV0QGa9D3Wrh2BDQtpBKxaNFV+/Cy2P/Sv+8s7Ud0Fd74X4+o/TNztWgETUapy+majNQ68Lq3ee0ZO48VEbTZYiH1Co4OlfWef82RWeyUXo7woM03PyapGfikTnQinoNq5z5veLpeMV3HCAMTaZmA1oGLAn7XS3XYsz+XK7VMQsc4XKrmDXOLU/pSXVNUq8dIqTba///3x6LiLS6xs1xuCAYSfcQ3+rQgmu7uvf3THKt5Ooo97TqcbRqxx7EASizaQCBQllG/rYxVapMLgtLbZS64w1MDBMXX+PQpBKNwqUKOf2DDRDUXQf9EhOS0Qj4nTmlA8dzSLz/G1d+Ud8MTy/6ghhdiLpeerGY/UlDOfiuqFsMUU5/UYlP+BAmgRLuNpvrUaLlVkrqDievNVEAwF+4CoM1MZTmjxjJMsKJq+u8Zd7tNCUFy6LiyYXRJQ4VyvEQFFaCGKsxIwQkk7EzZ6LTJq2hUuPhvAW+gQnSG6J+MszC+7QCRHcnqDdyNRJ6T9xyS87A6MDutbzKGvGktpbXqtzWtXb9HsfK2cBMomjN9a4y+TaJLnXxAeX/HWzmf4cR4vALt/P4w4qgKY04ml4ZdLOinFYS6cup3G/1ie4+t1eOnpBNlqGqs75ilzkT4+DsZQxNvaSKJ//6zIbbk/M7LOhFmRc/1R+kBtz7JFGdZm/COotIdvQoXpTqP/1uqEUmCb/QWoGLMwO5ANcHzxdY48IGP5+J+zKOTBFZ4Pid+GTM+Wq12MV/H86xEJptBa6T+p3kgpwLedManBHC2GgNrFpoN2xnrMz9WFWX/8/ygSBkavq2Uv7FdCsLEYLu9LLIvAU0bNRDtzYl+/vXmjpIvuJFYjmI0im6QEYqnIeMsNjXG4vIutIGHijeAG/9EDBozKV5cldkHbLxHh25vT+ZEzbhXlqvpzKJwcEgfNwLAKFeo0/pvEE10XDB+EXRTXtSzJozQKFFAJhMxYkVaCW+E9AL7tMeU8acxidHqzb6lX4691UsDpy/LLRmT+epgW56+5Cw8tB4kMUv6s9lh3eRKbyGs+H/4mQMaYzPTf2OOdokEn+zzgvoD3FqNKk8QqGAXVsqcGdXrT62fSPkR2vROFi68A6se86UxRUk4cajfPyCC4G5wDhD+zNq4jodQ4u4n/m37Lr36n4LIAAsVr02dFi9AiwA81MYs2rm4eDlDNmdMRvEKRHfBwW5DdMNp0jPFZMeARqF/wL4XBfd+EMLBfMzpH5GH6NaW+1vrvMdg+VxDzatk3MXgO3ro3P/DpcC6+Mo4MySJhKJhSR01SGGGp5hPWmrrUgrv3lDnP+HhcI3nt3YqBoVAVTBAQT5iuhTg8nvPtd8ZeYj6w1x6RqGUBrSku7+N1+BaasZvjTk64RoIDlL8brpEcJx3OmY7jLoZsswdtmhfC/G21llXhITOwmvRDDeTTPbyASOa16cF5/A1fZAidJpqju3wYAy9avPR1ya6eNp9K8XYrrtuxlqi+bDKwlfrYdR0RRiKRVTLOH85+ZY7XSmzRpfZBJjaTa81VDcJHpZnZnSQLASGYW9l51ZV/h7eVzTi3Hv6hUsgc/51AqJRTkpbFVLXXszoBL8nBX0u/0jBLT8nH+fJePbrwURT58OY+UieRjd1vs04w0VG5VN2U6MoGZkQzKN/ptz0Q366dxoTGmj7i1NQGHi9GgnquXFYdrCfZBmeb7s0T6yrdlZH5cZuwHFyIJ/kAtGsTg0xH5taAAq44BAk1CPk9KVVbqQzrCUiFdF/6gtlPQ8bHHc1G1W92MXGZ5HEHftyLYs8mbD/9xYRUWkHmlM0zC2ilJlnNgV4bfALpQghxOUoZL7VTqtCHIaQSXm+YUMnpkXybnV+A6xlm2CVy8fn0Xlm2XRa0+zzOa21JWWmixfiPMSCZ7qA4rS93VN3pkpF1s5TonQjisHf7iU9ZGvUPOAKZcR1pbeVf/Ul7OhepGCaId9wOtqo7pJ7yLcBZ0pFkOF28y4zEI/kcUNmutBHaQpBdNM8vjCS6HZRokkeo88TBAjGyG7SR+6vUgTcyK9Imalj0kuxz0wmK+byQU11AiJFk/ya5dNduRClcnU64yGu/ieWSeOos1t3ep+RPIWQ2pyTYVbZltTbsb7NiwSi3AV+8KLWk7LxCnfZUetEM8ThnsSoGH38/nyAwFguJp8FjvlHtcWZuU4hPva0rHfr0UhOOJ/F6vS62FW7KzkmRll2HEc7oUq4fyi5T70Vl7YVIfsPHUCdHesf9Lk7WNVWO75JDkYbMI8TOW8JKVtLY9d6UJRITO8oKo0xS+o99Yy04iniGHAaGj88kEWgwv0OrHdY/nr76DOGNS59hXCGXzTKUvDl9iKpLSWYN1lxIeyywdNpTkhay74w2jFT6NS8qkjo5CxA1yfSYwp6AJIZNKIeEK5PJAW7ORgWgwp0VgzYpqovMrWxbu+DGZ6Lhie1RAqpzm8VUzKJOH3mCzWuTOLsN3VT/dv2eeYe9UjbR8YTBsLz7q60VN1sU51k+um1f8JxD5pPhbhSC8rRaB454tmh6YUWrJI3+GWY0qeWioj/tbkYITOkJaeuGt4JrJvHA+l0Gu7kY7XOaa05alMnRWVCXqFgLIwSY4uF59Ue5SU4QKuc/HamDxbr0x6csCetXGoP7Qn1Bk/J9DsynO/UD6iZ1Hyrz+jit0hDCwi/E9OjgKTbB3ZQKQ/0ZOvevfNHG0NK4Aj3Cp7NpRk07RT1i/S0EL93Ag8GRgKI9CfpajKyK6+Jj/PI1KO5/85VAwz2AwzP8FTBb075IxCXv6T9RVvWT2tUaqxDS92zrGUbWzUYk9mSs82pECH+fkqsDt93VW++4YsR/dHCYcQSYTO/KaBMDj9LSD/J/+z20Kq8XvZUAIHtm9hRPP3ItbuAu2Hm5lkPs92pd7kCxgRs0xOVBnZ13ccdA0aunrwv9SdqElJRC3g+oCu+nXyCgmXUs9yMjTMAIHfxZV+aPKcZeUBWt057Xo85Ks1Ir5gzEHCWqZEhrLZMuF11ziGtFQUds/EESajhagzcKsxamcSZxGth4UII+adPhQkUnx2WyN+4YWR+r3f8MnkyGFuR4zjzxJS8WsQYR5PTyRaD9ixa6Mh741nBHbzfjXHskGDq179xaRNrCIB1z1xRfWfjqw2pHc1zk9xlPpL8sQWAIuETZZhbnmL54rceXVNRvUiKrrqIkeogsl0XXb17ylNb0f4GA9Wd44vffEG8FSZGHEL2fbaTGRcSiCeA8PmA/f6Hz8HCS76fXUHwgwkzSwlI71ekZ7Fapmlk/KC+Hs8hUcw3N2LN5LhkVYyizYFl/uPeVP5lsoJHhhfWvvSWruCUW1ZcJOeuTbrDgywJ/qG07gZJplnTvLcYdNaH0KMYOYMGX+rB4NGPFmQsNaIwlWrfCezxre8zXBrsMT+edVLbLqN1BqB76JH4BvZTqUIMfGwPGEn+EnmTV86fPBaYbFL3DFEhjB45CewkXEAtJxk4/Ms2pPXnaRqdky0HOYdcUcE2zcXq4vaIvW2/v0nHFJH2XXe22ueDmq/18XGtELSq85j9X8q0tcNSSKJIX8FTuJF/Pf8j5PhqG2u+osvsLxYrvvfeVJL+4tkcXcr9JV7v0ERmj/X6fM3NC4j6dS1+9Umr2oPavqiAydTZPLMNRGY23LO9zAVDly7jD+70G5TPPLdhRIl4WxcYjLnM+SNcJ26FOrkrISUtPObIz5Zb3AG612krnpy15RMW+1cQjlnWFI6538qky9axd2oJmHIHP08KyP0ubGO+TQNOYuv2uh17yCIvR8VcStw7o1g0NM60sk+8Tq7YfIBJrtp53GkvzXH7OA0p8/n/u1satf/VJhtR1l8Wa6Gmaug7haSpaCaYQax6ta0mkutlb+eAOSG1aobM81D9A4iS1RRlzBBoVX6tU1S6WE2N9ORY6DfeLRC4l9Rvr5h95XDWB2mR1d4WFudpsgVYwiTwT31ljskD8ZyDOlm5DkGh9N/UB/0AI5Xvb8ZBmai2hQ4BWMqFwYnzxwB26YHSOv9WgY3JXnvoN+2R4rqGVh/LLDMtpFP+SpMGJNWvbIl5SOodbCczW2RKleksPoUeGEzrjtKHVdtZA+kfqO+rVx/iclCqwoopepvJpSTDjT+b9GWylGRF8EDbGlw6eUzmJM95Ovoz+kwLX3c2fTjFeYEsE7vUZm3mqdGJuKh2w9/QGSaqRHs99aScGOdDqkFcACoqdbBoQqqjamhH6Q9ng39JCg3lrGJwd50Qk9ovnqBTr8MME7Ps2wiVfygUmPoUBJJfJWX5Nda0nuncbFkA=='));
+}
+exports.getData = getData;
+
+},{"./decoder.js":44,"@ethersproject/base64":27}],46:[function(require,module,exports){
+"use strict";
+/**
+ * MIT License
+ *
+ * Copyright (c) 2021 Andrew Raffensperger
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * This is a near carbon-copy of the original source (link below) with the
+ * TypeScript typings added and a few tweaks to make it ES3-compatible.
+ *
+ * See: https://github.com/adraffy/ens-normalize.js
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ens_normalize = exports.ens_normalize_post_check = void 0;
+var strings_1 = require("@ethersproject/strings");
+var include_js_1 = require("./include.js");
+var r = (0, include_js_1.getData)();
+var decoder_js_1 = require("./decoder.js");
+// @TODO: This should be lazily loaded
+var VALID = new Set((0, decoder_js_1.read_member_array)(r));
+var IGNORED = new Set((0, decoder_js_1.read_member_array)(r));
+var MAPPED = (0, decoder_js_1.read_mapped_map)(r);
+var EMOJI_ROOT = (0, decoder_js_1.read_emoji_trie)(r);
+//const NFC_CHECK = new Set(read_member_array(r, Array.from(VALID.values()).sort((a, b) => a - b)));
+//const STOP = 0x2E;
+var HYPHEN = 0x2D;
+var UNDERSCORE = 0x5F;
+function explode_cp(name) {
+    return (0, strings_1.toUtf8CodePoints)(name);
+}
+function filter_fe0f(cps) {
+    return cps.filter(function (cp) { return cp != 0xFE0F; });
+}
+function ens_normalize_post_check(name) {
+    for (var _i = 0, _a = name.split('.'); _i < _a.length; _i++) {
+        var label = _a[_i];
+        var cps = explode_cp(label);
+        try {
+            for (var i = cps.lastIndexOf(UNDERSCORE) - 1; i >= 0; i--) {
+                if (cps[i] !== UNDERSCORE) {
+                    throw new Error("underscore only allowed at start");
+                }
+            }
+            if (cps.length >= 4 && cps.every(function (cp) { return cp < 0x80; }) && cps[2] === HYPHEN && cps[3] === HYPHEN) {
+                throw new Error("invalid label extension");
+            }
+        }
+        catch (err) {
+            throw new Error("Invalid label \"" + label + "\": " + err.message);
+        }
+    }
+    return name;
+}
+exports.ens_normalize_post_check = ens_normalize_post_check;
+function ens_normalize(name) {
+    return ens_normalize_post_check(normalize(name, filter_fe0f));
+}
+exports.ens_normalize = ens_normalize;
+function normalize(name, emoji_filter) {
+    var input = explode_cp(name).reverse(); // flip for pop
+    var output = [];
+    while (input.length) {
+        var emoji = consume_emoji_reversed(input);
+        if (emoji) {
+            output.push.apply(output, emoji_filter(emoji));
+            continue;
+        }
+        var cp = input.pop();
+        if (VALID.has(cp)) {
+            output.push(cp);
+            continue;
+        }
+        if (IGNORED.has(cp)) {
+            continue;
+        }
+        var cps = MAPPED[cp];
+        if (cps) {
+            output.push.apply(output, cps);
+            continue;
+        }
+        throw new Error("Disallowed codepoint: 0x" + cp.toString(16).toUpperCase());
+    }
+    return ens_normalize_post_check(nfc(String.fromCodePoint.apply(String, output)));
+}
+function nfc(s) {
+    return s.normalize('NFC');
+}
+function consume_emoji_reversed(cps, eaten) {
+    var _a;
+    var node = EMOJI_ROOT;
+    var emoji;
+    var saved;
+    var stack = [];
+    var pos = cps.length;
+    if (eaten)
+        eaten.length = 0; // clear input buffer (if needed)
+    var _loop_1 = function () {
+        var cp = cps[--pos];
+        node = (_a = node.branches.find(function (x) { return x.set.has(cp); })) === null || _a === void 0 ? void 0 : _a.node;
+        if (!node)
+            return "break";
+        if (node.save) { // remember
+            saved = cp;
+        }
+        else if (node.check) { // check exclusion
+            if (cp === saved)
+                return "break";
+        }
+        stack.push(cp);
+        if (node.fe0f) {
+            stack.push(0xFE0F);
+            if (pos > 0 && cps[pos - 1] == 0xFE0F)
+                pos--; // consume optional FE0F
+        }
+        if (node.valid) { // this is a valid emoji (so far)
+            emoji = stack.slice(); // copy stack
+            if (node.valid == 2)
+                emoji.splice(1, 1); // delete FE0F at position 1 (RGI ZWJ don't follow spec!)
+            if (eaten)
+                eaten.push.apply(eaten, cps.slice(pos).reverse()); // copy input (if needed)
+            cps.length = pos; // truncate
+        }
+    };
+    while (pos) {
+        var state_1 = _loop_1();
+        if (state_1 === "break")
+            break;
+    }
+    return emoji;
+}
+
+},{"./decoder.js":44,"./include.js":45,"@ethersproject/strings":106}],47:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.id = void 0;
@@ -6291,22 +11468,25 @@ function id(text) {
 }
 exports.id = id;
 
-},{"@ethersproject/keccak256":55,"@ethersproject/strings":100}],43:[function(require,module,exports){
+},{"@ethersproject/keccak256":60,"@ethersproject/strings":106}],48:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports._TypedDataEncoder = exports.hashMessage = exports.messagePrefix = exports.isValidName = exports.namehash = exports.id = void 0;
+exports._TypedDataEncoder = exports.hashMessage = exports.messagePrefix = exports.ensNormalize = exports.isValidName = exports.namehash = exports.dnsEncode = exports.id = void 0;
 var id_1 = require("./id");
 Object.defineProperty(exports, "id", { enumerable: true, get: function () { return id_1.id; } });
 var namehash_1 = require("./namehash");
+Object.defineProperty(exports, "dnsEncode", { enumerable: true, get: function () { return namehash_1.dnsEncode; } });
 Object.defineProperty(exports, "isValidName", { enumerable: true, get: function () { return namehash_1.isValidName; } });
 Object.defineProperty(exports, "namehash", { enumerable: true, get: function () { return namehash_1.namehash; } });
 var message_1 = require("./message");
 Object.defineProperty(exports, "hashMessage", { enumerable: true, get: function () { return message_1.hashMessage; } });
 Object.defineProperty(exports, "messagePrefix", { enumerable: true, get: function () { return message_1.messagePrefix; } });
+var namehash_2 = require("./namehash");
+Object.defineProperty(exports, "ensNormalize", { enumerable: true, get: function () { return namehash_2.ensNormalize; } });
 var typed_data_1 = require("./typed-data");
 Object.defineProperty(exports, "_TypedDataEncoder", { enumerable: true, get: function () { return typed_data_1.TypedDataEncoder; } });
 
-},{"./id":42,"./message":44,"./namehash":45,"./typed-data":46}],44:[function(require,module,exports){
+},{"./id":47,"./message":49,"./namehash":50,"./typed-data":51}],49:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.hashMessage = exports.messagePrefix = void 0;
@@ -6326,28 +11506,54 @@ function hashMessage(message) {
 }
 exports.hashMessage = hashMessage;
 
-},{"@ethersproject/bytes":33,"@ethersproject/keccak256":55,"@ethersproject/strings":100}],45:[function(require,module,exports){
+},{"@ethersproject/bytes":35,"@ethersproject/keccak256":60,"@ethersproject/strings":106}],50:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.namehash = exports.isValidName = void 0;
+exports.dnsEncode = exports.namehash = exports.isValidName = exports.ensNormalize = void 0;
 var bytes_1 = require("@ethersproject/bytes");
 var strings_1 = require("@ethersproject/strings");
 var keccak256_1 = require("@ethersproject/keccak256");
 var logger_1 = require("@ethersproject/logger");
 var _version_1 = require("./_version");
 var logger = new logger_1.Logger(_version_1.version);
+var lib_1 = require("./ens-normalize/lib");
 var Zeros = new Uint8Array(32);
 Zeros.fill(0);
-var Partition = new RegExp("^((.*)\\.)?([^.]+)$");
+function checkComponent(comp) {
+    if (comp.length === 0) {
+        throw new Error("invalid ENS name; empty component");
+    }
+    return comp;
+}
+function ensNameSplit(name) {
+    var bytes = (0, strings_1.toUtf8Bytes)((0, lib_1.ens_normalize)(name));
+    var comps = [];
+    if (name.length === 0) {
+        return comps;
+    }
+    var last = 0;
+    for (var i = 0; i < bytes.length; i++) {
+        var d = bytes[i];
+        // A separator (i.e. "."); copy this component
+        if (d === 0x2e) {
+            comps.push(checkComponent(bytes.slice(last, i)));
+            last = i + 1;
+        }
+    }
+    // There was a stray separator at the end of the name
+    if (last >= bytes.length) {
+        throw new Error("invalid ENS name; empty component");
+    }
+    comps.push(checkComponent(bytes.slice(last)));
+    return comps;
+}
+function ensNormalize(name) {
+    return ensNameSplit(name).map(function (comp) { return (0, strings_1.toUtf8String)(comp); }).join(".");
+}
+exports.ensNormalize = ensNormalize;
 function isValidName(name) {
     try {
-        var comps = name.split(".");
-        for (var i = 0; i < comps.length; i++) {
-            if ((0, strings_1.nameprep)(comps[i]).length === 0) {
-                throw new Error("empty");
-            }
-        }
-        return true;
+        return (ensNameSplit(name).length !== 0);
     }
     catch (error) { }
     return false;
@@ -6358,22 +11564,29 @@ function namehash(name) {
     if (typeof (name) !== "string") {
         logger.throwArgumentError("invalid ENS name; not a string", "name", name);
     }
-    var current = name;
     var result = Zeros;
-    while (current.length) {
-        var partition = current.match(Partition);
-        if (partition == null || partition[2] === "") {
-            logger.throwArgumentError("invalid ENS address; missing component", "name", name);
-        }
-        var label = (0, strings_1.toUtf8Bytes)((0, strings_1.nameprep)(partition[3]));
-        result = (0, keccak256_1.keccak256)((0, bytes_1.concat)([result, (0, keccak256_1.keccak256)(label)]));
-        current = partition[2] || "";
+    var comps = ensNameSplit(name);
+    while (comps.length) {
+        result = (0, keccak256_1.keccak256)((0, bytes_1.concat)([result, (0, keccak256_1.keccak256)(comps.pop())]));
     }
     return (0, bytes_1.hexlify)(result);
 }
 exports.namehash = namehash;
+function dnsEncode(name) {
+    return (0, bytes_1.hexlify)((0, bytes_1.concat)(ensNameSplit(name).map(function (comp) {
+        // DNS does not allow components over 63 bytes in length
+        if (comp.length > 63) {
+            throw new Error("invalid DNS encoded entry; length exceeds 63 bytes");
+        }
+        var bytes = new Uint8Array(comp.length + 1);
+        bytes.set(comp, 1);
+        bytes[0] = bytes.length - 1;
+        return bytes;
+    }))) + "00";
+}
+exports.dnsEncode = dnsEncode;
 
-},{"./_version":41,"@ethersproject/bytes":33,"@ethersproject/keccak256":55,"@ethersproject/logger":57,"@ethersproject/strings":100}],46:[function(require,module,exports){
+},{"./_version":43,"./ens-normalize/lib":46,"@ethersproject/bytes":35,"@ethersproject/keccak256":60,"@ethersproject/logger":62,"@ethersproject/strings":106}],51:[function(require,module,exports){
 "use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -6875,13 +12088,13 @@ var TypedDataEncoder = /** @class */ (function () {
 }());
 exports.TypedDataEncoder = TypedDataEncoder;
 
-},{"./_version":41,"./id":42,"@ethersproject/address":24,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/keccak256":55,"@ethersproject/logger":57,"@ethersproject/properties":63}],47:[function(require,module,exports){
+},{"./_version":43,"./id":47,"@ethersproject/address":25,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/keccak256":60,"@ethersproject/logger":62,"@ethersproject/properties":68}],52:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "hdnode/5.5.0";
+exports.version = "hdnode/5.7.0";
 
-},{}],48:[function(require,module,exports){
+},{}],53:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAccountPath = exports.isValidMnemonic = exports.entropyToMnemonic = exports.mnemonicToEntropy = exports.mnemonicToSeed = exports.HDNode = exports.defaultPath = void 0;
@@ -6941,8 +12154,6 @@ var HDNode = /** @class */ (function () {
      *   - fromSeed
      */
     function HDNode(constructorGuard, privateKey, publicKey, parentFingerprint, chainCode, index, depth, mnemonicOrPath) {
-        var _newTarget = this.constructor;
-        logger.checkNew(_newTarget, HDNode);
         /* istanbul ignore if */
         if (constructorGuard !== _constructorGuard) {
             throw new Error("HDNode constructor cannot be called directly");
@@ -7227,13 +12438,13 @@ function getAccountPath(index) {
 }
 exports.getAccountPath = getAccountPath;
 
-},{"./_version":47,"@ethersproject/basex":27,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/logger":57,"@ethersproject/pbkdf2":61,"@ethersproject/properties":63,"@ethersproject/sha2":90,"@ethersproject/signing-key":94,"@ethersproject/strings":100,"@ethersproject/transactions":103,"@ethersproject/wordlists":112}],49:[function(require,module,exports){
+},{"./_version":52,"@ethersproject/basex":28,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/logger":62,"@ethersproject/pbkdf2":66,"@ethersproject/properties":68,"@ethersproject/sha2":96,"@ethersproject/signing-key":100,"@ethersproject/strings":106,"@ethersproject/transactions":109,"@ethersproject/wordlists":118}],54:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "json-wallets/5.5.0";
+exports.version = "json-wallets/5.7.0";
 
-},{}],50:[function(require,module,exports){
+},{}],55:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -7309,7 +12520,7 @@ function decrypt(json, password) {
 }
 exports.decrypt = decrypt;
 
-},{"./_version":49,"./utils":54,"@ethersproject/address":24,"@ethersproject/bytes":33,"@ethersproject/keccak256":55,"@ethersproject/logger":57,"@ethersproject/pbkdf2":61,"@ethersproject/properties":63,"@ethersproject/strings":100,"aes-js":123}],51:[function(require,module,exports){
+},{"./_version":54,"./utils":59,"@ethersproject/address":25,"@ethersproject/bytes":35,"@ethersproject/keccak256":60,"@ethersproject/logger":62,"@ethersproject/pbkdf2":66,"@ethersproject/properties":68,"@ethersproject/strings":106,"aes-js":129}],56:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.decryptJsonWalletSync = exports.decryptJsonWallet = exports.getJsonWalletAddress = exports.isKeystoreWallet = exports.isCrowdsaleWallet = exports.encryptKeystore = exports.decryptKeystoreSync = exports.decryptKeystore = exports.decryptCrowdsale = void 0;
@@ -7351,7 +12562,7 @@ function decryptJsonWalletSync(json, password) {
 }
 exports.decryptJsonWalletSync = decryptJsonWalletSync;
 
-},{"./crowdsale":50,"./inspect":52,"./keystore":53}],52:[function(require,module,exports){
+},{"./crowdsale":55,"./inspect":57,"./keystore":58}],57:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getJsonWalletAddress = exports.isKeystoreWallet = exports.isCrowdsaleWallet = void 0;
@@ -7406,7 +12617,7 @@ function getJsonWalletAddress(json) {
 }
 exports.getJsonWalletAddress = getJsonWalletAddress;
 
-},{"@ethersproject/address":24}],53:[function(require,module,exports){
+},{"@ethersproject/address":25}],58:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -7742,7 +12953,7 @@ function encrypt(account, password, options, progressCallback) {
             address: account.address.substring(2).toLowerCase(),
             id: (0, utils_1.uuidV4)(uuidRandom),
             version: 3,
-            Crypto: {
+            crypto: {
                 cipher: "aes-128-ctr",
                 cipherparams: {
                     iv: (0, bytes_1.hexlify)(iv).substring(2),
@@ -7787,7 +12998,7 @@ function encrypt(account, password, options, progressCallback) {
 }
 exports.encrypt = encrypt;
 
-},{"./_version":49,"./utils":54,"@ethersproject/address":24,"@ethersproject/bytes":33,"@ethersproject/hdnode":48,"@ethersproject/keccak256":55,"@ethersproject/logger":57,"@ethersproject/pbkdf2":61,"@ethersproject/properties":63,"@ethersproject/random":84,"@ethersproject/transactions":103,"aes-js":123,"scrypt-js":172}],54:[function(require,module,exports){
+},{"./_version":54,"./utils":59,"@ethersproject/address":25,"@ethersproject/bytes":35,"@ethersproject/hdnode":53,"@ethersproject/keccak256":60,"@ethersproject/logger":62,"@ethersproject/pbkdf2":66,"@ethersproject/properties":68,"@ethersproject/random":90,"@ethersproject/transactions":109,"aes-js":129,"scrypt-js":178}],59:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.uuidV4 = exports.searchPath = exports.getPassword = exports.zpad = exports.looseArrayify = void 0;
@@ -7858,7 +13069,7 @@ function uuidV4(randomBytes) {
 }
 exports.uuidV4 = uuidV4;
 
-},{"@ethersproject/bytes":33,"@ethersproject/strings":100}],55:[function(require,module,exports){
+},{"@ethersproject/bytes":35,"@ethersproject/strings":106}],60:[function(require,module,exports){
 "use strict";
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -7872,13 +13083,13 @@ function keccak256(data) {
 }
 exports.keccak256 = keccak256;
 
-},{"@ethersproject/bytes":33,"js-sha3":168}],56:[function(require,module,exports){
+},{"@ethersproject/bytes":35,"js-sha3":174}],61:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "logger/5.5.0";
+exports.version = "logger/5.7.0";
 
-},{}],57:[function(require,module,exports){
+},{}],62:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Logger = exports.ErrorCode = exports.LogLevel = void 0;
@@ -7997,6 +13208,11 @@ var ErrorCode;
     //   - replacement: the full TransactionsResponse for the replacement
     //   - receipt: the receipt of the replacement
     ErrorCode["TRANSACTION_REPLACED"] = "TRANSACTION_REPLACED";
+    ///////////////////
+    // Interaction Errors
+    // The user rejected the action, such as signing a message or sending
+    // a transaction
+    ErrorCode["ACTION_REJECTED"] = "ACTION_REJECTED";
 })(ErrorCode = exports.ErrorCode || (exports.ErrorCode = {}));
 ;
 var HEX = "0123456789abcdef";
@@ -8073,6 +13289,40 @@ var Logger = /** @class */ (function () {
         messageDetails.push("code=" + code);
         messageDetails.push("version=" + this.version);
         var reason = message;
+        var url = "";
+        switch (code) {
+            case ErrorCode.NUMERIC_FAULT: {
+                url = "NUMERIC_FAULT";
+                var fault = message;
+                switch (fault) {
+                    case "overflow":
+                    case "underflow":
+                    case "division-by-zero":
+                        url += "-" + fault;
+                        break;
+                    case "negative-power":
+                    case "negative-width":
+                        url += "-unsupported";
+                        break;
+                    case "unbound-bitwise-result":
+                        url += "-unbound-result";
+                        break;
+                }
+                break;
+            }
+            case ErrorCode.CALL_EXCEPTION:
+            case ErrorCode.INSUFFICIENT_FUNDS:
+            case ErrorCode.MISSING_NEW:
+            case ErrorCode.NONCE_EXPIRED:
+            case ErrorCode.REPLACEMENT_UNDERPRICED:
+            case ErrorCode.TRANSACTION_REPLACED:
+            case ErrorCode.UNPREDICTABLE_GAS_LIMIT:
+                url = code;
+                break;
+        }
+        if (url) {
+            message += " [ See: https:/\/links.ethers.org/v5-errors-" + url + " ]";
+        }
         if (messageDetails.length) {
             message += " (" + messageDetails.join(", ") + ")";
         }
@@ -8211,13 +13461,13 @@ var Logger = /** @class */ (function () {
 }());
 exports.Logger = Logger;
 
-},{"./_version":56}],58:[function(require,module,exports){
+},{"./_version":61}],63:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "networks/5.5.2";
+exports.version = "networks/5.7.1";
 
-},{}],59:[function(require,module,exports){
+},{}],64:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getNetwork = void 0;
@@ -8234,41 +13484,51 @@ function ethDefaultProvider(network) {
             options = {};
         }
         var providerList = [];
-        if (providers.InfuraProvider) {
+        if (providers.InfuraProvider && options.infura !== "-") {
             try {
                 providerList.push(new providers.InfuraProvider(network, options.infura));
             }
             catch (error) { }
         }
-        if (providers.EtherscanProvider) {
+        if (providers.EtherscanProvider && options.etherscan !== "-") {
             try {
                 providerList.push(new providers.EtherscanProvider(network, options.etherscan));
             }
             catch (error) { }
         }
-        if (providers.AlchemyProvider) {
+        if (providers.AlchemyProvider && options.alchemy !== "-") {
             try {
                 providerList.push(new providers.AlchemyProvider(network, options.alchemy));
             }
             catch (error) { }
         }
-        if (providers.PocketProvider) {
+        if (providers.PocketProvider && options.pocket !== "-") {
             // These networks are currently faulty on Pocket as their
             // network does not handle the Berlin hardfork, which is
             // live on these ones.
             // @TODO: This goes away once Pocket has upgraded their nodes
-            var skip = ["goerli", "ropsten", "rinkeby"];
+            var skip = ["goerli", "ropsten", "rinkeby", "sepolia"];
             try {
-                var provider = new providers.PocketProvider(network);
+                var provider = new providers.PocketProvider(network, options.pocket);
                 if (provider.network && skip.indexOf(provider.network.name) === -1) {
                     providerList.push(provider);
                 }
             }
             catch (error) { }
         }
-        if (providers.CloudflareProvider) {
+        if (providers.CloudflareProvider && options.cloudflare !== "-") {
             try {
                 providerList.push(new providers.CloudflareProvider(network));
+            }
+            catch (error) { }
+        }
+        if (providers.AnkrProvider && options.ankr !== "-") {
+            try {
+                var skip = ["ropsten"];
+                var provider = new providers.AnkrProvider(network, options.ankr);
+                if (provider.network && skip.indexOf(provider.network.name) === -1) {
+                    providerList.push(provider);
+                }
             }
             catch (error) { }
         }
@@ -8347,6 +13607,11 @@ var networks = {
         _defaultProvider: ethDefaultProvider("goerli")
     },
     kintsugi: { chainId: 1337702, name: "kintsugi" },
+    sepolia: {
+        chainId: 11155111,
+        name: "sepolia",
+        _defaultProvider: ethDefaultProvider("sepolia")
+    },
     // ETC (See: #351)
     classic: {
         chainId: 61,
@@ -8362,13 +13627,22 @@ var networks = {
         _defaultProvider: etcDefaultProvider("https:/\/www.ethercluster.com/kotti", "classicKotti")
     },
     xdai: { chainId: 100, name: "xdai" },
-    matic: { chainId: 137, name: "matic" },
+    matic: {
+        chainId: 137,
+        name: "matic",
+        _defaultProvider: ethDefaultProvider("matic")
+    },
     maticmum: { chainId: 80001, name: "maticmum" },
-    optimism: { chainId: 10, name: "optimism" },
+    optimism: {
+        chainId: 10,
+        name: "optimism",
+        _defaultProvider: ethDefaultProvider("optimism")
+    },
     "optimism-kovan": { chainId: 69, name: "optimism-kovan" },
     "optimism-goerli": { chainId: 420, name: "optimism-goerli" },
     arbitrum: { chainId: 42161, name: "arbitrum" },
     "arbitrum-rinkeby": { chainId: 421611, name: "arbitrum-rinkeby" },
+    "arbitrum-goerli": { chainId: 421613, name: "arbitrum-goerli" },
     bnb: { chainId: 56, name: "bnb" },
     bnbt: { chainId: 97, name: "bnbt" },
 };
@@ -8445,7 +13719,7 @@ function getNetwork(network) {
 }
 exports.getNetwork = getNetwork;
 
-},{"./_version":58,"@ethersproject/logger":57}],60:[function(require,module,exports){
+},{"./_version":63,"@ethersproject/logger":62}],65:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.pbkdf2 = void 0;
@@ -8493,20 +13767,20 @@ function pbkdf2(password, salt, iterations, keylen, hashAlgorithm) {
 }
 exports.pbkdf2 = pbkdf2;
 
-},{"@ethersproject/bytes":33,"@ethersproject/sha2":90}],61:[function(require,module,exports){
+},{"@ethersproject/bytes":35,"@ethersproject/sha2":96}],66:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.pbkdf2 = void 0;
 var pbkdf2_1 = require("./pbkdf2");
 Object.defineProperty(exports, "pbkdf2", { enumerable: true, get: function () { return pbkdf2_1.pbkdf2; } });
 
-},{"./pbkdf2":60}],62:[function(require,module,exports){
+},{"./pbkdf2":65}],67:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "properties/5.5.0";
+exports.version = "properties/5.7.0";
 
-},{}],63:[function(require,module,exports){
+},{}],68:[function(require,module,exports){
 "use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -8678,13 +13952,13 @@ var Description = /** @class */ (function () {
 }());
 exports.Description = Description;
 
-},{"./_version":62,"@ethersproject/logger":57}],64:[function(require,module,exports){
+},{"./_version":67,"@ethersproject/logger":62}],69:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "providers/5.5.3";
+exports.version = "providers/5.7.2";
 
-},{}],65:[function(require,module,exports){
+},{}],70:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -8755,17 +14029,8 @@ var AlchemyProvider = /** @class */ (function (_super) {
             case "homestead":
                 host = "eth-mainnet.alchemyapi.io/v2/";
                 break;
-            case "ropsten":
-                host = "eth-ropsten.alchemyapi.io/v2/";
-                break;
-            case "rinkeby":
-                host = "eth-rinkeby.alchemyapi.io/v2/";
-                break;
             case "goerli":
-                host = "eth-goerli.alchemyapi.io/v2/";
-                break;
-            case "kovan":
-                host = "eth-kovan.alchemyapi.io/v2/";
+                host = "eth-goerli.g.alchemy.com/v2/";
                 break;
             case "matic":
                 host = "polygon-mainnet.g.alchemy.com/v2/";
@@ -8776,14 +14041,14 @@ var AlchemyProvider = /** @class */ (function (_super) {
             case "arbitrum":
                 host = "arb-mainnet.g.alchemy.com/v2/";
                 break;
-            case "arbitrum-rinkeby":
-                host = "arb-rinkeby.g.alchemy.com/v2/";
+            case "arbitrum-goerli":
+                host = "arb-goerli.g.alchemy.com/v2/";
                 break;
             case "optimism":
                 host = "opt-mainnet.g.alchemy.com/v2/";
                 break;
-            case "optimism-kovan":
-                host = "opt-kovan.g.alchemy.com/v2/";
+            case "optimism-goerli":
+                host = "opt-goerli.g.alchemy.com/v2/";
                 break;
             default:
                 logger.throwArgumentError("unsupported network", "network", arguments[0]);
@@ -8806,7 +14071,87 @@ var AlchemyProvider = /** @class */ (function (_super) {
 }(url_json_rpc_provider_1.UrlJsonRpcProvider));
 exports.AlchemyProvider = AlchemyProvider;
 
-},{"./_version":64,"./formatter":72,"./url-json-rpc-provider":79,"./websocket-provider":81,"@ethersproject/logger":57,"@ethersproject/properties":63}],66:[function(require,module,exports){
+},{"./_version":69,"./formatter":78,"./url-json-rpc-provider":85,"./websocket-provider":87,"@ethersproject/logger":62,"@ethersproject/properties":68}],71:[function(require,module,exports){
+"use strict";
+var __extends = (this && this.__extends) || (function () {
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (Object.prototype.hasOwnProperty.call(b, p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
+    return function (d, b) {
+        if (typeof b !== "function" && b !== null)
+            throw new TypeError("Class extends value " + String(b) + " is not a constructor or null");
+        extendStatics(d, b);
+        function __() { this.constructor = d; }
+        d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AnkrProvider = void 0;
+var formatter_1 = require("./formatter");
+var url_json_rpc_provider_1 = require("./url-json-rpc-provider");
+var logger_1 = require("@ethersproject/logger");
+var _version_1 = require("./_version");
+var logger = new logger_1.Logger(_version_1.version);
+var defaultApiKey = "9f7d929b018cdffb338517efa06f58359e86ff1ffd350bc889738523659e7972";
+function getHost(name) {
+    switch (name) {
+        case "homestead":
+            return "rpc.ankr.com/eth/";
+        case "ropsten":
+            return "rpc.ankr.com/eth_ropsten/";
+        case "rinkeby":
+            return "rpc.ankr.com/eth_rinkeby/";
+        case "goerli":
+            return "rpc.ankr.com/eth_goerli/";
+        case "matic":
+            return "rpc.ankr.com/polygon/";
+        case "arbitrum":
+            return "rpc.ankr.com/arbitrum/";
+    }
+    return logger.throwArgumentError("unsupported network", "name", name);
+}
+var AnkrProvider = /** @class */ (function (_super) {
+    __extends(AnkrProvider, _super);
+    function AnkrProvider() {
+        return _super !== null && _super.apply(this, arguments) || this;
+    }
+    AnkrProvider.prototype.isCommunityResource = function () {
+        return (this.apiKey === defaultApiKey);
+    };
+    AnkrProvider.getApiKey = function (apiKey) {
+        if (apiKey == null) {
+            return defaultApiKey;
+        }
+        return apiKey;
+    };
+    AnkrProvider.getUrl = function (network, apiKey) {
+        if (apiKey == null) {
+            apiKey = defaultApiKey;
+        }
+        var connection = {
+            allowGzip: true,
+            url: ("https:/\/" + getHost(network.name) + apiKey),
+            throttleCallback: function (attempt, url) {
+                if (apiKey.apiKey === defaultApiKey) {
+                    (0, formatter_1.showThrottleMessage)();
+                }
+                return Promise.resolve(true);
+            }
+        };
+        if (apiKey.projectSecret != null) {
+            connection.user = "";
+            connection.password = apiKey.projectSecret;
+        }
+        return connection;
+    };
+    return AnkrProvider;
+}(url_json_rpc_provider_1.UrlJsonRpcProvider));
+exports.AnkrProvider = AnkrProvider;
+
+},{"./_version":69,"./formatter":78,"./url-json-rpc-provider":85,"@ethersproject/logger":62}],72:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -8865,6 +14210,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BaseProvider = exports.Resolver = exports.Event = void 0;
 var abstract_provider_1 = require("@ethersproject/abstract-provider");
+var base64_1 = require("@ethersproject/base64");
 var basex_1 = require("@ethersproject/basex");
 var bignumber_1 = require("@ethersproject/bignumber");
 var bytes_1 = require("@ethersproject/bytes");
@@ -8880,6 +14226,7 @@ var logger_1 = require("@ethersproject/logger");
 var _version_1 = require("./_version");
 var logger = new logger_1.Logger(_version_1.version);
 var formatter_1 = require("./formatter");
+var MAX_CCIP_REDIRECTS = 10;
 //////////////////////////////
 // Event Serializeing
 function checkTopic(topic) {
@@ -8980,6 +14327,8 @@ var Event = /** @class */ (function () {
         (0, properties_1.defineReadOnly)(this, "tag", tag);
         (0, properties_1.defineReadOnly)(this, "listener", listener);
         (0, properties_1.defineReadOnly)(this, "once", once);
+        this._lastBlockNumber = -2;
+        this._inflight = false;
     }
     Object.defineProperty(Event.prototype, "event", {
         get: function () {
@@ -9062,18 +14411,18 @@ var matchers = [
     matcherIpfs,
     new RegExp("^eip155:[0-9]+/(erc[0-9]+):(.*)$", "i"),
 ];
-function _parseString(result) {
+function _parseString(result, start) {
     try {
-        return (0, strings_1.toUtf8String)(_parseBytes(result));
+        return (0, strings_1.toUtf8String)(_parseBytes(result, start));
     }
     catch (error) { }
     return null;
 }
-function _parseBytes(result) {
+function _parseBytes(result, start) {
     if (result === "0x") {
         return null;
     }
-    var offset = bignumber_1.BigNumber.from((0, bytes_1.hexDataSlice)(result, 0, 32)).toNumber();
+    var offset = bignumber_1.BigNumber.from((0, bytes_1.hexDataSlice)(result, start, start + 32)).toNumber();
     var length = bignumber_1.BigNumber.from((0, bytes_1.hexDataSlice)(result, offset, offset + 32)).toNumber();
     return (0, bytes_1.hexDataSlice)(result, offset + 32, offset + 32 + length);
 }
@@ -9090,6 +14439,43 @@ function getIpfsLink(link) {
     }
     return "https://gateway.ipfs.io/ipfs/" + link;
 }
+function numPad(value) {
+    var result = (0, bytes_1.arrayify)(value);
+    if (result.length > 32) {
+        throw new Error("internal; should not happen");
+    }
+    var padded = new Uint8Array(32);
+    padded.set(result, 32 - result.length);
+    return padded;
+}
+function bytesPad(value) {
+    if ((value.length % 32) === 0) {
+        return value;
+    }
+    var result = new Uint8Array(Math.ceil(value.length / 32) * 32);
+    result.set(value);
+    return result;
+}
+// ABI Encodes a series of (bytes, bytes, ...)
+function encodeBytes(datas) {
+    var result = [];
+    var byteCount = 0;
+    // Add place-holders for pointers as we add items
+    for (var i = 0; i < datas.length; i++) {
+        result.push(null);
+        byteCount += 32;
+    }
+    for (var i = 0; i < datas.length; i++) {
+        var data = (0, bytes_1.arrayify)(datas[i]);
+        // Update the bytes offset
+        result[i] = numPad(byteCount);
+        // The length and padded value of data
+        result.push(numPad(data.length));
+        result.push(bytesPad(data));
+        byteCount += 32 + Math.ceil(data.length / 32) * 32;
+    }
+    return (0, bytes_1.hexConcat)(result);
+}
 var Resolver = /** @class */ (function () {
     // The resolvedAddress is only for creating a ReverseLookup resolver
     function Resolver(provider, address, name, resolvedAddress) {
@@ -9098,29 +14484,83 @@ var Resolver = /** @class */ (function () {
         (0, properties_1.defineReadOnly)(this, "address", provider.formatter.address(address));
         (0, properties_1.defineReadOnly)(this, "_resolvedAddress", resolvedAddress);
     }
-    Resolver.prototype._fetchBytes = function (selector, parameters) {
+    Resolver.prototype.supportsWildcard = function () {
+        var _this = this;
+        if (!this._supportsEip2544) {
+            // supportsInterface(bytes4 = selector("resolve(bytes,bytes)"))
+            this._supportsEip2544 = this.provider.call({
+                to: this.address,
+                data: "0x01ffc9a79061b92300000000000000000000000000000000000000000000000000000000"
+            }).then(function (result) {
+                return bignumber_1.BigNumber.from(result).eq(1);
+            }).catch(function (error) {
+                if (error.code === logger_1.Logger.errors.CALL_EXCEPTION) {
+                    return false;
+                }
+                // Rethrow the error: link is down, etc. Let future attempts retry.
+                _this._supportsEip2544 = null;
+                throw error;
+            });
+        }
+        return this._supportsEip2544;
+    };
+    Resolver.prototype._fetch = function (selector, parameters) {
         return __awaiter(this, void 0, void 0, function () {
-            var tx, _a, error_1;
-            return __generator(this, function (_b) {
-                switch (_b.label) {
+            var tx, parseBytes, result, error_1;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
                     case 0:
                         tx = {
                             to: this.address,
+                            ccipReadEnabled: true,
                             data: (0, bytes_1.hexConcat)([selector, (0, hash_1.namehash)(this.name), (parameters || "0x")])
                         };
-                        _b.label = 1;
+                        parseBytes = false;
+                        return [4 /*yield*/, this.supportsWildcard()];
                     case 1:
-                        _b.trys.push([1, 3, , 4]);
-                        _a = _parseBytes;
+                        if (_a.sent()) {
+                            parseBytes = true;
+                            // selector("resolve(bytes,bytes)")
+                            tx.data = (0, bytes_1.hexConcat)(["0x9061b923", encodeBytes([(0, hash_1.dnsEncode)(this.name), tx.data])]);
+                        }
+                        _a.label = 2;
+                    case 2:
+                        _a.trys.push([2, 4, , 5]);
                         return [4 /*yield*/, this.provider.call(tx)];
-                    case 2: return [2 /*return*/, _a.apply(void 0, [_b.sent()])];
                     case 3:
-                        error_1 = _b.sent();
+                        result = _a.sent();
+                        if (((0, bytes_1.arrayify)(result).length % 32) === 4) {
+                            logger.throwError("resolver threw error", logger_1.Logger.errors.CALL_EXCEPTION, {
+                                transaction: tx, data: result
+                            });
+                        }
+                        if (parseBytes) {
+                            result = _parseBytes(result, 0);
+                        }
+                        return [2 /*return*/, result];
+                    case 4:
+                        error_1 = _a.sent();
                         if (error_1.code === logger_1.Logger.errors.CALL_EXCEPTION) {
                             return [2 /*return*/, null];
                         }
+                        throw error_1;
+                    case 5: return [2 /*return*/];
+                }
+            });
+        });
+    };
+    Resolver.prototype._fetchBytes = function (selector, parameters) {
+        return __awaiter(this, void 0, void 0, function () {
+            var result;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0: return [4 /*yield*/, this._fetch(selector, parameters)];
+                    case 1:
+                        result = _a.sent();
+                        if (result != null) {
+                            return [2 /*return*/, _parseBytes(result, 0)];
+                        }
                         return [2 /*return*/, null];
-                    case 4: return [2 /*return*/];
                 }
             });
         });
@@ -9179,7 +14619,7 @@ var Resolver = /** @class */ (function () {
     };
     Resolver.prototype.getAddress = function (coinType) {
         return __awaiter(this, void 0, void 0, function () {
-            var transaction, hexBytes_1, error_2, hexBytes, address;
+            var result, error_2, hexBytes, address;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
@@ -9190,18 +14630,14 @@ var Resolver = /** @class */ (function () {
                         _a.label = 1;
                     case 1:
                         _a.trys.push([1, 3, , 4]);
-                        transaction = {
-                            to: this.address,
-                            data: ("0x3b3b57de" + (0, hash_1.namehash)(this.name).substring(2))
-                        };
-                        return [4 /*yield*/, this.provider.call(transaction)];
+                        return [4 /*yield*/, this._fetch("0x3b3b57de")];
                     case 2:
-                        hexBytes_1 = _a.sent();
+                        result = _a.sent();
                         // No address
-                        if (hexBytes_1 === "0x" || hexBytes_1 === constants_1.HashZero) {
+                        if (result === "0x" || result === constants_1.HashZero) {
                             return [2 /*return*/, null];
                         }
-                        return [2 /*return*/, this.provider.formatter.callAddress(hexBytes_1)];
+                        return [2 /*return*/, this.provider.formatter.callAddress(result)];
                     case 3:
                         error_2 = _a.sent();
                         if (error_2.code === logger_1.Logger.errors.CALL_EXCEPTION) {
@@ -9323,7 +14759,7 @@ var Resolver = /** @class */ (function () {
                         _g = _parseString;
                         return [4 /*yield*/, this.provider.call(tx)];
                     case 15:
-                        metadataUrl = _g.apply(void 0, [_h.sent()]);
+                        metadataUrl = _g.apply(void 0, [_h.sent(), 0]);
                         if (metadataUrl == null) {
                             return [2 /*return*/, null];
                         }
@@ -9376,7 +14812,7 @@ var Resolver = /** @class */ (function () {
     };
     Resolver.prototype.getContentHash = function () {
         return __awaiter(this, void 0, void 0, function () {
-            var hexBytes, ipfs, length_4, swarm;
+            var hexBytes, ipfs, length_4, ipns, length_5, swarm, skynet, urlSafe_1, hash;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0: return [4 /*yield*/, this._fetchBytes("0xbc1c58d1")];
@@ -9393,10 +14829,25 @@ var Resolver = /** @class */ (function () {
                                 return [2 /*return*/, "ipfs:/\/" + basex_1.Base58.encode("0x" + ipfs[1])];
                             }
                         }
+                        ipns = hexBytes.match(/^0xe5010172(([0-9a-f][0-9a-f])([0-9a-f][0-9a-f])([0-9a-f]*))$/);
+                        if (ipns) {
+                            length_5 = parseInt(ipns[3], 16);
+                            if (ipns[4].length === length_5 * 2) {
+                                return [2 /*return*/, "ipns:/\/" + basex_1.Base58.encode("0x" + ipns[1])];
+                            }
+                        }
                         swarm = hexBytes.match(/^0xe40101fa011b20([0-9a-f]*)$/);
                         if (swarm) {
                             if (swarm[1].length === (32 * 2)) {
                                 return [2 /*return*/, "bzz:/\/" + swarm[1]];
+                            }
+                        }
+                        skynet = hexBytes.match(/^0x90b2c605([0-9a-f]*)$/);
+                        if (skynet) {
+                            if (skynet[1].length === (34 * 2)) {
+                                urlSafe_1 = { "=": "", "+": "-", "/": "_" };
+                                hash = (0, base64_1.encode)("0x" + skynet[1]).replace(/[=+\/]/g, function (a) { return (urlSafe_1[a]); });
+                                return [2 /*return*/, "sia:/\/" + hash];
                             }
                         }
                         return [2 /*return*/, logger.throwError("invalid or unsupported content hash data", logger_1.Logger.errors.UNSUPPORTED_OPERATION, {
@@ -9450,12 +14901,11 @@ var BaseProvider = /** @class */ (function (_super) {
      */
     function BaseProvider(network) {
         var _newTarget = this.constructor;
-        var _this = this;
-        logger.checkNew(_newTarget, abstract_provider_1.Provider);
-        _this = _super.call(this) || this;
+        var _this = _super.call(this) || this;
         // Events being listened to
         _this._events = [];
         _this._emitted = { block: -2 };
+        _this.disableCcipRead = false;
         _this.formatter = _newTarget.getFormatter();
         // If network is any, this Provider allows the underlying
         // network to change dynamically, and we auto-detect the
@@ -9483,6 +14933,7 @@ var BaseProvider = /** @class */ (function (_super) {
         }
         _this._maxInternalBlockNumber = -1024;
         _this._lastBlockNumber = -2;
+        _this._maxFilterBlockRange = 10;
         _this._pollingInterval = 4000;
         _this._fastQueryDate = 0;
         return _this;
@@ -9565,6 +15016,53 @@ var BaseProvider = /** @class */ (function (_super) {
     // @TODO: Remove this and just use getNetwork
     BaseProvider.getNetwork = function (network) {
         return (0, networks_1.getNetwork)((network == null) ? "homestead" : network);
+    };
+    BaseProvider.prototype.ccipReadFetch = function (tx, calldata, urls) {
+        return __awaiter(this, void 0, void 0, function () {
+            var sender, data, errorMessages, i, url, href, json, result, errorMessage;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0:
+                        if (this.disableCcipRead || urls.length === 0) {
+                            return [2 /*return*/, null];
+                        }
+                        sender = tx.to.toLowerCase();
+                        data = calldata.toLowerCase();
+                        errorMessages = [];
+                        i = 0;
+                        _a.label = 1;
+                    case 1:
+                        if (!(i < urls.length)) return [3 /*break*/, 4];
+                        url = urls[i];
+                        href = url.replace("{sender}", sender).replace("{data}", data);
+                        json = (url.indexOf("{data}") >= 0) ? null : JSON.stringify({ data: data, sender: sender });
+                        return [4 /*yield*/, (0, web_1.fetchJson)({ url: href, errorPassThrough: true }, json, function (value, response) {
+                                value.status = response.statusCode;
+                                return value;
+                            })];
+                    case 2:
+                        result = _a.sent();
+                        if (result.data) {
+                            return [2 /*return*/, result.data];
+                        }
+                        errorMessage = (result.message || "unknown error");
+                        // 4xx indicates the result is not present; stop
+                        if (result.status >= 400 && result.status < 500) {
+                            return [2 /*return*/, logger.throwError("response not found during CCIP fetch: " + errorMessage, logger_1.Logger.errors.SERVER_ERROR, { url: url, errorMessage: errorMessage })];
+                        }
+                        // 5xx indicates server issue; try the next url
+                        errorMessages.push(errorMessage);
+                        _a.label = 3;
+                    case 3:
+                        i++;
+                        return [3 /*break*/, 1];
+                    case 4: return [2 /*return*/, logger.throwError("error encountered during CCIP fetch: " + errorMessages.map(function (m) { return JSON.stringify(m); }).join(", "), logger_1.Logger.errors.SERVER_ERROR, {
+                            urls: urls,
+                            errorMessages: errorMessages
+                        })];
+                }
+            });
+        });
     };
     // Fetches the blockNumber, but will reuse any result that is less
     // than maxAge old or has been requested since the last request
@@ -9734,20 +15232,54 @@ var BaseProvider = /** @class */ (function (_super) {
                                     break;
                                 }
                                 case "filter": {
-                                    var filter_1 = event.filter;
-                                    filter_1.fromBlock = _this._lastBlockNumber + 1;
-                                    filter_1.toBlock = blockNumber;
-                                    var runner = _this.getLogs(filter_1).then(function (logs) {
-                                        if (logs.length === 0) {
-                                            return;
+                                    // We only allow a single getLogs to be in-flight at a time
+                                    if (!event._inflight) {
+                                        event._inflight = true;
+                                        // This is the first filter for this event, so we want to
+                                        // restrict events to events that happened no earlier than now
+                                        if (event._lastBlockNumber === -2) {
+                                            event._lastBlockNumber = blockNumber - 1;
                                         }
-                                        logs.forEach(function (log) {
-                                            _this._emitted["b:" + log.blockHash] = log.blockNumber;
-                                            _this._emitted["t:" + log.transactionHash] = log.blockNumber;
-                                            _this.emit(filter_1, log);
+                                        // Filter from the last *known* event; due to load-balancing
+                                        // and some nodes returning updated block numbers before
+                                        // indexing events, a logs result with 0 entries cannot be
+                                        // trusted and we must retry a range which includes it again
+                                        var filter_1 = event.filter;
+                                        filter_1.fromBlock = event._lastBlockNumber + 1;
+                                        filter_1.toBlock = blockNumber;
+                                        // Prevent fitler ranges from growing too wild, since it is quite
+                                        // likely there just haven't been any events to move the lastBlockNumber.
+                                        var minFromBlock = filter_1.toBlock - _this._maxFilterBlockRange;
+                                        if (minFromBlock > filter_1.fromBlock) {
+                                            filter_1.fromBlock = minFromBlock;
+                                        }
+                                        if (filter_1.fromBlock < 0) {
+                                            filter_1.fromBlock = 0;
+                                        }
+                                        var runner = _this.getLogs(filter_1).then(function (logs) {
+                                            // Allow the next getLogs
+                                            event._inflight = false;
+                                            if (logs.length === 0) {
+                                                return;
+                                            }
+                                            logs.forEach(function (log) {
+                                                // Only when we get an event for a given block number
+                                                // can we trust the events are indexed
+                                                if (log.blockNumber > event._lastBlockNumber) {
+                                                    event._lastBlockNumber = log.blockNumber;
+                                                }
+                                                // Make sure we stall requests to fetch blocks and txs
+                                                _this._emitted["b:" + log.blockHash] = log.blockNumber;
+                                                _this._emitted["t:" + log.transactionHash] = log.blockNumber;
+                                                _this.emit(filter_1, log);
+                                            });
+                                        }).catch(function (error) {
+                                            _this.emit("error", error);
+                                            // Allow another getLogs (the range was not updated)
+                                            event._inflight = false;
                                         });
-                                    }).catch(function (error) { _this.emit("error", error); });
-                                    runners.push(runner);
+                                        runners.push(runner);
+                                    }
                                     break;
                                 }
                             }
@@ -10435,9 +15967,106 @@ var BaseProvider = /** @class */ (function (_super) {
             });
         });
     };
+    BaseProvider.prototype._call = function (transaction, blockTag, attempt) {
+        return __awaiter(this, void 0, void 0, function () {
+            var txSender, result, data, sender, urls, urlsOffset, urlsLength, urlsData, u, url, calldata, callbackSelector, extraData, ccipResult, tx, error_8;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0:
+                        if (attempt >= MAX_CCIP_REDIRECTS) {
+                            logger.throwError("CCIP read exceeded maximum redirections", logger_1.Logger.errors.SERVER_ERROR, {
+                                redirects: attempt,
+                                transaction: transaction
+                            });
+                        }
+                        txSender = transaction.to;
+                        return [4 /*yield*/, this.perform("call", { transaction: transaction, blockTag: blockTag })];
+                    case 1:
+                        result = _a.sent();
+                        if (!(attempt >= 0 && blockTag === "latest" && txSender != null && result.substring(0, 10) === "0x556f1830" && ((0, bytes_1.hexDataLength)(result) % 32 === 4))) return [3 /*break*/, 5];
+                        _a.label = 2;
+                    case 2:
+                        _a.trys.push([2, 4, , 5]);
+                        data = (0, bytes_1.hexDataSlice)(result, 4);
+                        sender = (0, bytes_1.hexDataSlice)(data, 0, 32);
+                        if (!bignumber_1.BigNumber.from(sender).eq(txSender)) {
+                            logger.throwError("CCIP Read sender did not match", logger_1.Logger.errors.CALL_EXCEPTION, {
+                                name: "OffchainLookup",
+                                signature: "OffchainLookup(address,string[],bytes,bytes4,bytes)",
+                                transaction: transaction,
+                                data: result
+                            });
+                        }
+                        urls = [];
+                        urlsOffset = bignumber_1.BigNumber.from((0, bytes_1.hexDataSlice)(data, 32, 64)).toNumber();
+                        urlsLength = bignumber_1.BigNumber.from((0, bytes_1.hexDataSlice)(data, urlsOffset, urlsOffset + 32)).toNumber();
+                        urlsData = (0, bytes_1.hexDataSlice)(data, urlsOffset + 32);
+                        for (u = 0; u < urlsLength; u++) {
+                            url = _parseString(urlsData, u * 32);
+                            if (url == null) {
+                                logger.throwError("CCIP Read contained corrupt URL string", logger_1.Logger.errors.CALL_EXCEPTION, {
+                                    name: "OffchainLookup",
+                                    signature: "OffchainLookup(address,string[],bytes,bytes4,bytes)",
+                                    transaction: transaction,
+                                    data: result
+                                });
+                            }
+                            urls.push(url);
+                        }
+                        calldata = _parseBytes(data, 64);
+                        // Get the callbackSelector (bytes4)
+                        if (!bignumber_1.BigNumber.from((0, bytes_1.hexDataSlice)(data, 100, 128)).isZero()) {
+                            logger.throwError("CCIP Read callback selector included junk", logger_1.Logger.errors.CALL_EXCEPTION, {
+                                name: "OffchainLookup",
+                                signature: "OffchainLookup(address,string[],bytes,bytes4,bytes)",
+                                transaction: transaction,
+                                data: result
+                            });
+                        }
+                        callbackSelector = (0, bytes_1.hexDataSlice)(data, 96, 100);
+                        extraData = _parseBytes(data, 128);
+                        return [4 /*yield*/, this.ccipReadFetch(transaction, calldata, urls)];
+                    case 3:
+                        ccipResult = _a.sent();
+                        if (ccipResult == null) {
+                            logger.throwError("CCIP Read disabled or provided no URLs", logger_1.Logger.errors.CALL_EXCEPTION, {
+                                name: "OffchainLookup",
+                                signature: "OffchainLookup(address,string[],bytes,bytes4,bytes)",
+                                transaction: transaction,
+                                data: result
+                            });
+                        }
+                        tx = {
+                            to: txSender,
+                            data: (0, bytes_1.hexConcat)([callbackSelector, encodeBytes([ccipResult, extraData])])
+                        };
+                        return [2 /*return*/, this._call(tx, blockTag, attempt + 1)];
+                    case 4:
+                        error_8 = _a.sent();
+                        if (error_8.code === logger_1.Logger.errors.SERVER_ERROR) {
+                            throw error_8;
+                        }
+                        return [3 /*break*/, 5];
+                    case 5:
+                        try {
+                            return [2 /*return*/, (0, bytes_1.hexlify)(result)];
+                        }
+                        catch (error) {
+                            return [2 /*return*/, logger.throwError("bad result from backend", logger_1.Logger.errors.SERVER_ERROR, {
+                                    method: "call",
+                                    params: { transaction: transaction, blockTag: blockTag },
+                                    result: result,
+                                    error: error
+                                })];
+                        }
+                        return [2 /*return*/];
+                }
+            });
+        });
+    };
     BaseProvider.prototype.call = function (transaction, blockTag) {
         return __awaiter(this, void 0, void 0, function () {
-            var params, result;
+            var resolved;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0: return [4 /*yield*/, this.getNetwork()];
@@ -10445,25 +16074,12 @@ var BaseProvider = /** @class */ (function (_super) {
                         _a.sent();
                         return [4 /*yield*/, (0, properties_1.resolveProperties)({
                                 transaction: this._getTransactionRequest(transaction),
-                                blockTag: this._getBlockTag(blockTag)
+                                blockTag: this._getBlockTag(blockTag),
+                                ccipReadEnabled: Promise.resolve(transaction.ccipReadEnabled)
                             })];
                     case 2:
-                        params = _a.sent();
-                        return [4 /*yield*/, this.perform("call", params)];
-                    case 3:
-                        result = _a.sent();
-                        try {
-                            return [2 /*return*/, (0, bytes_1.hexlify)(result)];
-                        }
-                        catch (error) {
-                            return [2 /*return*/, logger.throwError("bad result from backend", logger_1.Logger.errors.SERVER_ERROR, {
-                                    method: "call",
-                                    params: params,
-                                    result: result,
-                                    error: error
-                                })];
-                        }
-                        return [2 /*return*/];
+                        resolved = _a.sent();
+                        return [2 /*return*/, this._call(resolved.transaction, resolved.blockTag, resolved.ccipReadEnabled ? 0 : -1)];
                 }
             });
         });
@@ -10526,7 +16142,7 @@ var BaseProvider = /** @class */ (function (_super) {
     };
     BaseProvider.prototype._getBlock = function (blockHashOrBlockTag, includeTransactions) {
         return __awaiter(this, void 0, void 0, function () {
-            var blockNumber, params, _a, error_8;
+            var blockNumber, params, _a, error_9;
             var _this = this;
             return __generator(this, function (_b) {
                 switch (_b.label) {
@@ -10554,7 +16170,7 @@ var BaseProvider = /** @class */ (function (_super) {
                         }
                         return [3 /*break*/, 6];
                     case 5:
-                        error_8 = _b.sent();
+                        error_9 = _b.sent();
                         logger.throwArgumentError("invalid block hash or block tag", "blockHashOrBlockTag", blockHashOrBlockTag);
                         return [3 /*break*/, 6];
                     case 6: return [2 /*return*/, (0, web_1.poll)(function () { return __awaiter(_this, void 0, void 0, function () {
@@ -10794,58 +16410,78 @@ var BaseProvider = /** @class */ (function (_super) {
     };
     BaseProvider.prototype.getResolver = function (name) {
         return __awaiter(this, void 0, void 0, function () {
-            var address, error_9;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
+            var currentName, addr, resolver, _a;
+            return __generator(this, function (_b) {
+                switch (_b.label) {
                     case 0:
-                        _a.trys.push([0, 2, , 3]);
-                        return [4 /*yield*/, this._getResolver(name)];
+                        currentName = name;
+                        _b.label = 1;
                     case 1:
-                        address = _a.sent();
-                        if (address == null) {
+                        if (!true) return [3 /*break*/, 6];
+                        if (currentName === "" || currentName === ".") {
                             return [2 /*return*/, null];
                         }
-                        return [2 /*return*/, new Resolver(this, address, name)];
+                        // Optimization since the eth node cannot change and does
+                        // not have a wildcard resolver
+                        if (name !== "eth" && currentName === "eth") {
+                            return [2 /*return*/, null];
+                        }
+                        return [4 /*yield*/, this._getResolver(currentName, "getResolver")];
                     case 2:
-                        error_9 = _a.sent();
-                        if (error_9.code === logger_1.Logger.errors.CALL_EXCEPTION) {
+                        addr = _b.sent();
+                        if (!(addr != null)) return [3 /*break*/, 5];
+                        resolver = new Resolver(this, addr, name);
+                        _a = currentName !== name;
+                        if (!_a) return [3 /*break*/, 4];
+                        return [4 /*yield*/, resolver.supportsWildcard()];
+                    case 3:
+                        _a = !(_b.sent());
+                        _b.label = 4;
+                    case 4:
+                        // Legacy resolver found, using EIP-2544 so it isn't safe to use
+                        if (_a) {
                             return [2 /*return*/, null];
                         }
-                        throw error_9;
-                    case 3: return [2 /*return*/];
+                        return [2 /*return*/, resolver];
+                    case 5:
+                        // Get the parent node
+                        currentName = currentName.split(".").slice(1).join(".");
+                        return [3 /*break*/, 1];
+                    case 6: return [2 /*return*/];
                 }
             });
         });
     };
-    BaseProvider.prototype._getResolver = function (name) {
+    BaseProvider.prototype._getResolver = function (name, operation) {
         return __awaiter(this, void 0, void 0, function () {
-            var network, transaction, _a, _b, error_10;
-            return __generator(this, function (_c) {
-                switch (_c.label) {
-                    case 0: return [4 /*yield*/, this.getNetwork()];
+            var network, addrData, error_10;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0:
+                        if (operation == null) {
+                            operation = "ENS";
+                        }
+                        return [4 /*yield*/, this.getNetwork()];
                     case 1:
-                        network = _c.sent();
+                        network = _a.sent();
                         // No ENS...
                         if (!network.ensAddress) {
-                            logger.throwError("network does not support ENS", logger_1.Logger.errors.UNSUPPORTED_OPERATION, { operation: "ENS", network: network.name });
+                            logger.throwError("network does not support ENS", logger_1.Logger.errors.UNSUPPORTED_OPERATION, { operation: operation, network: network.name });
                         }
-                        transaction = {
-                            to: network.ensAddress,
-                            data: ("0x0178b8bf" + (0, hash_1.namehash)(name).substring(2))
-                        };
-                        _c.label = 2;
+                        _a.label = 2;
                     case 2:
-                        _c.trys.push([2, 4, , 5]);
-                        _b = (_a = this.formatter).callAddress;
-                        return [4 /*yield*/, this.call(transaction)];
-                    case 3: return [2 /*return*/, _b.apply(_a, [_c.sent()])];
+                        _a.trys.push([2, 4, , 5]);
+                        return [4 /*yield*/, this.call({
+                                to: network.ensAddress,
+                                data: ("0x0178b8bf" + (0, hash_1.namehash)(name).substring(2))
+                            })];
+                    case 3:
+                        addrData = _a.sent();
+                        return [2 /*return*/, this.formatter.callAddress(addrData)];
                     case 4:
-                        error_10 = _c.sent();
-                        if (error_10.code === logger_1.Logger.errors.CALL_EXCEPTION) {
-                            return [2 /*return*/, null];
-                        }
-                        throw error_10;
-                    case 5: return [2 /*return*/];
+                        error_10 = _a.sent();
+                        return [3 /*break*/, 5];
+                    case 5: return [2 /*return*/, null];
                 }
             });
         });
@@ -10885,43 +16521,27 @@ var BaseProvider = /** @class */ (function (_super) {
     };
     BaseProvider.prototype.lookupAddress = function (address) {
         return __awaiter(this, void 0, void 0, function () {
-            var reverseName, resolverAddress, bytes, _a, length, name, addr;
+            var node, resolverAddr, name, _a, addr;
             return __generator(this, function (_b) {
                 switch (_b.label) {
                     case 0: return [4 /*yield*/, address];
                     case 1:
                         address = _b.sent();
                         address = this.formatter.address(address);
-                        reverseName = address.substring(2).toLowerCase() + ".addr.reverse";
-                        return [4 /*yield*/, this._getResolver(reverseName)];
+                        node = address.substring(2).toLowerCase() + ".addr.reverse";
+                        return [4 /*yield*/, this._getResolver(node, "lookupAddress")];
                     case 2:
-                        resolverAddress = _b.sent();
-                        if (!resolverAddress) {
+                        resolverAddr = _b.sent();
+                        if (resolverAddr == null) {
                             return [2 /*return*/, null];
                         }
-                        _a = bytes_1.arrayify;
+                        _a = _parseString;
                         return [4 /*yield*/, this.call({
-                                to: resolverAddress,
-                                data: ("0x691f3431" + (0, hash_1.namehash)(reverseName).substring(2))
+                                to: resolverAddr,
+                                data: ("0x691f3431" + (0, hash_1.namehash)(node).substring(2))
                             })];
                     case 3:
-                        bytes = _a.apply(void 0, [_b.sent()]);
-                        // Strip off the dynamic string pointer (0x20)
-                        if (bytes.length < 32 || !bignumber_1.BigNumber.from(bytes.slice(0, 32)).eq(32)) {
-                            return [2 /*return*/, null];
-                        }
-                        bytes = bytes.slice(32);
-                        // Not a length-prefixed string
-                        if (bytes.length < 32) {
-                            return [2 /*return*/, null];
-                        }
-                        length = bignumber_1.BigNumber.from(bytes.slice(0, 32)).toNumber();
-                        bytes = bytes.slice(32);
-                        // Length longer than available data
-                        if (length > bytes.length) {
-                            return [2 /*return*/, null];
-                        }
-                        name = (0, strings_1.toUtf8String)(bytes.slice(0, length));
+                        name = _a.apply(void 0, [_b.sent(), 0]);
                         return [4 /*yield*/, this.resolveName(name)];
                     case 4:
                         addr = _b.sent();
@@ -10935,33 +16555,69 @@ var BaseProvider = /** @class */ (function (_super) {
     };
     BaseProvider.prototype.getAvatar = function (nameOrAddress) {
         return __awaiter(this, void 0, void 0, function () {
-            var resolver, address, reverseName, resolverAddress, avatar;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
+            var resolver, address, node, resolverAddress, avatar_1, error_11, name_1, _a, error_12, avatar;
+            return __generator(this, function (_b) {
+                switch (_b.label) {
                     case 0:
                         resolver = null;
-                        if (!(0, bytes_1.isHexString)(nameOrAddress)) return [3 /*break*/, 2];
+                        if (!(0, bytes_1.isHexString)(nameOrAddress)) return [3 /*break*/, 10];
                         address = this.formatter.address(nameOrAddress);
-                        reverseName = address.substring(2).toLowerCase() + ".addr.reverse";
-                        return [4 /*yield*/, this._getResolver(reverseName)];
+                        node = address.substring(2).toLowerCase() + ".addr.reverse";
+                        return [4 /*yield*/, this._getResolver(node, "getAvatar")];
                     case 1:
-                        resolverAddress = _a.sent();
+                        resolverAddress = _b.sent();
                         if (!resolverAddress) {
                             return [2 /*return*/, null];
                         }
-                        resolver = new Resolver(this, resolverAddress, "_", address);
-                        return [3 /*break*/, 4];
-                    case 2: return [4 /*yield*/, this.getResolver(nameOrAddress)];
+                        // Try resolving the avatar against the addr.reverse resolver
+                        resolver = new Resolver(this, resolverAddress, node);
+                        _b.label = 2;
+                    case 2:
+                        _b.trys.push([2, 4, , 5]);
+                        return [4 /*yield*/, resolver.getAvatar()];
                     case 3:
-                        // ENS name; forward lookup
-                        resolver = _a.sent();
+                        avatar_1 = _b.sent();
+                        if (avatar_1) {
+                            return [2 /*return*/, avatar_1.url];
+                        }
+                        return [3 /*break*/, 5];
+                    case 4:
+                        error_11 = _b.sent();
+                        if (error_11.code !== logger_1.Logger.errors.CALL_EXCEPTION) {
+                            throw error_11;
+                        }
+                        return [3 /*break*/, 5];
+                    case 5:
+                        _b.trys.push([5, 8, , 9]);
+                        _a = _parseString;
+                        return [4 /*yield*/, this.call({
+                                to: resolverAddress,
+                                data: ("0x691f3431" + (0, hash_1.namehash)(node).substring(2))
+                            })];
+                    case 6:
+                        name_1 = _a.apply(void 0, [_b.sent(), 0]);
+                        return [4 /*yield*/, this.getResolver(name_1)];
+                    case 7:
+                        resolver = _b.sent();
+                        return [3 /*break*/, 9];
+                    case 8:
+                        error_12 = _b.sent();
+                        if (error_12.code !== logger_1.Logger.errors.CALL_EXCEPTION) {
+                            throw error_12;
+                        }
+                        return [2 /*return*/, null];
+                    case 9: return [3 /*break*/, 12];
+                    case 10: return [4 /*yield*/, this.getResolver(nameOrAddress)];
+                    case 11:
+                        // ENS name; forward lookup with wildcard
+                        resolver = _b.sent();
                         if (!resolver) {
                             return [2 /*return*/, null];
                         }
-                        _a.label = 4;
-                    case 4: return [4 /*yield*/, resolver.getAvatar()];
-                    case 5:
-                        avatar = _a.sent();
+                        _b.label = 12;
+                    case 12: return [4 /*yield*/, resolver.getAvatar()];
+                    case 13:
+                        avatar = _b.sent();
                         if (avatar == null) {
                             return [2 /*return*/, null];
                         }
@@ -11081,14 +16737,14 @@ var BaseProvider = /** @class */ (function (_super) {
 }(abstract_provider_1.Provider));
 exports.BaseProvider = BaseProvider;
 
-},{"./_version":64,"./formatter":72,"@ethersproject/abstract-provider":20,"@ethersproject/basex":27,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/constants":37,"@ethersproject/hash":43,"@ethersproject/logger":57,"@ethersproject/networks":59,"@ethersproject/properties":63,"@ethersproject/sha2":90,"@ethersproject/strings":100,"@ethersproject/web":110,"bech32":125}],67:[function(require,module,exports){
+},{"./_version":69,"./formatter":78,"@ethersproject/abstract-provider":21,"@ethersproject/base64":27,"@ethersproject/basex":28,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/constants":39,"@ethersproject/hash":48,"@ethersproject/logger":62,"@ethersproject/networks":64,"@ethersproject/properties":68,"@ethersproject/sha2":96,"@ethersproject/strings":106,"@ethersproject/web":116,"bech32":131}],73:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.IpcProvider = void 0;
 var IpcProvider = null;
 exports.IpcProvider = IpcProvider;
 
-},{}],68:[function(require,module,exports){
+},{}],74:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WebSocket = void 0;
@@ -11111,7 +16767,7 @@ catch (error) {
     };
 }
 
-},{"./_version":64,"@ethersproject/logger":57}],69:[function(require,module,exports){
+},{"./_version":69,"@ethersproject/logger":62}],75:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -11212,7 +16868,7 @@ var CloudflareProvider = /** @class */ (function (_super) {
 }(url_json_rpc_provider_1.UrlJsonRpcProvider));
 exports.CloudflareProvider = CloudflareProvider;
 
-},{"./_version":64,"./url-json-rpc-provider":79,"@ethersproject/logger":57}],70:[function(require,module,exports){
+},{"./_version":69,"./url-json-rpc-provider":85,"@ethersproject/logger":62}],76:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -11308,7 +16964,7 @@ function getResult(result) {
     if (result.status == 0 && (result.message === "No records found" || result.message === "No transactions found")) {
         return result.result;
     }
-    if (result.status != 1 || result.message != "OK") {
+    if (result.status != 1 || typeof (result.message) !== "string" || !result.message.match(/^OK/)) {
         var error = new Error("invalid response");
         error.result = JSON.stringify(result);
         if ((result.result || "").toLowerCase().indexOf("rate limit") >= 0) {
@@ -11355,7 +17011,6 @@ function checkLogTag(blockTag) {
     }
     return parseInt(blockTag.substring(2), 16);
 }
-var defaultApiKey = "9D13ZE7XSBTJ94N9BNJ2MA33VMAY2YPIRB";
 function checkError(method, error, transaction) {
     // Undo the "convenience" some nodes are attempting to prevent backwards
     // incompatibility; maybe for v6 consider forwarding reverts as errors
@@ -11427,29 +17082,34 @@ function checkError(method, error, transaction) {
 var EtherscanProvider = /** @class */ (function (_super) {
     __extends(EtherscanProvider, _super);
     function EtherscanProvider(network, apiKey) {
-        var _newTarget = this.constructor;
-        var _this = this;
-        logger.checkNew(_newTarget, EtherscanProvider);
-        _this = _super.call(this, network) || this;
+        var _this = _super.call(this, network) || this;
         (0, properties_1.defineReadOnly)(_this, "baseUrl", _this.getBaseUrl());
-        (0, properties_1.defineReadOnly)(_this, "apiKey", apiKey || defaultApiKey);
+        (0, properties_1.defineReadOnly)(_this, "apiKey", apiKey || null);
         return _this;
     }
     EtherscanProvider.prototype.getBaseUrl = function () {
         switch (this.network ? this.network.name : "invalid") {
             case "homestead":
                 return "https:/\/api.etherscan.io";
-            case "ropsten":
-                return "https:/\/api-ropsten.etherscan.io";
-            case "rinkeby":
-                return "https:/\/api-rinkeby.etherscan.io";
-            case "kovan":
-                return "https:/\/api-kovan.etherscan.io";
             case "goerli":
                 return "https:/\/api-goerli.etherscan.io";
+            case "sepolia":
+                return "https:/\/api-sepolia.etherscan.io";
+            case "matic":
+                return "https:/\/api.polygonscan.com";
+            case "maticmum":
+                return "https:/\/api-testnet.polygonscan.com";
+            case "arbitrum":
+                return "https:/\/api.arbiscan.io";
+            case "arbitrum-goerli":
+                return "https:/\/api-goerli.arbiscan.io";
+            case "optimism":
+                return "https:/\/api-optimistic.etherscan.io";
+            case "optimism-goerli":
+                return "https:/\/api-goerli-optimistic.etherscan.io";
             default:
         }
-        return logger.throwArgumentError("unsupported network", "network", name);
+        return logger.throwArgumentError("unsupported network", "network", this.network.name);
     };
     EtherscanProvider.prototype.getUrl = function (module, params) {
         var query = Object.keys(params).reduce(function (accum, key) {
@@ -11731,13 +17391,13 @@ var EtherscanProvider = /** @class */ (function (_super) {
         });
     };
     EtherscanProvider.prototype.isCommunityResource = function () {
-        return (this.apiKey === defaultApiKey);
+        return (this.apiKey == null);
     };
     return EtherscanProvider;
 }(base_provider_1.BaseProvider));
 exports.EtherscanProvider = EtherscanProvider;
 
-},{"./_version":64,"./base-provider":66,"./formatter":72,"@ethersproject/bytes":33,"@ethersproject/logger":57,"@ethersproject/properties":63,"@ethersproject/transactions":103,"@ethersproject/web":110}],71:[function(require,module,exports){
+},{"./_version":69,"./base-provider":72,"./formatter":78,"@ethersproject/bytes":35,"@ethersproject/logger":62,"@ethersproject/properties":68,"@ethersproject/transactions":109,"@ethersproject/web":116}],77:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -12139,7 +17799,11 @@ function getRunner(config, currentBlockNumber, method, params) {
                 case 13:
                     provider = _b.sent();
                     _b.label = 14;
-                case 14: return [2 /*return*/, provider[method](params.transaction)];
+                case 14:
+                    if (method === "call" && params.blockTag) {
+                        return [2 /*return*/, provider[method](params.transaction, params.blockTag)];
+                    }
+                    return [2 /*return*/, provider[method](params.transaction)];
                 case 15: return [2 /*return*/, provider[method](params.transactionHash)];
                 case 16:
                     filter = params.filter;
@@ -12160,9 +17824,7 @@ function getRunner(config, currentBlockNumber, method, params) {
 var FallbackProvider = /** @class */ (function (_super) {
     __extends(FallbackProvider, _super);
     function FallbackProvider(providers, quorum) {
-        var _newTarget = this.constructor;
         var _this = this;
-        logger.checkNew(_newTarget, FallbackProvider);
         if (providers.length === 0) {
             logger.throwArgumentError("missing providers", "providers", providers);
         }
@@ -12435,7 +18097,7 @@ var FallbackProvider = /** @class */ (function (_super) {
 }(base_provider_1.BaseProvider));
 exports.FallbackProvider = FallbackProvider;
 
-},{"./_version":64,"./base-provider":66,"./formatter":72,"@ethersproject/abstract-provider":20,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/logger":57,"@ethersproject/properties":63,"@ethersproject/random":84,"@ethersproject/web":110}],72:[function(require,module,exports){
+},{"./_version":69,"./base-provider":72,"./formatter":78,"@ethersproject/abstract-provider":21,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/logger":62,"@ethersproject/properties":68,"@ethersproject/random":90,"@ethersproject/web":116}],78:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.showThrottleMessage = exports.isCommunityResource = exports.isCommunityResourcable = exports.Formatter = void 0;
@@ -12450,8 +18112,6 @@ var _version_1 = require("./_version");
 var logger = new logger_1.Logger(_version_1.version);
 var Formatter = /** @class */ (function () {
     function Formatter() {
-        var _newTarget = this.constructor;
-        logger.checkNew(_newTarget, Formatter);
         this.formats = this.getDefaultFormats();
     }
     Formatter.prototype.getDefaultFormats = function () {
@@ -12534,7 +18194,7 @@ var Formatter = /** @class */ (function () {
             type: type
         };
         formats.block = {
-            hash: hash,
+            hash: Formatter.allowNull(hash),
             parentHash: hash,
             number: number,
             timestamp: number,
@@ -12542,7 +18202,7 @@ var Formatter = /** @class */ (function () {
             difficulty: this.difficulty.bind(this),
             gasLimit: bigNumber,
             gasUsed: bigNumber,
-            miner: address,
+            miner: Formatter.allowNull(address),
             extraData: data,
             transactions: Formatter.allowNull(Formatter.arrayOf(hash)),
             baseFeePerGas: Formatter.allowNull(bigNumber)
@@ -12647,8 +18307,13 @@ var Formatter = /** @class */ (function () {
         if (blockTag === "earliest") {
             return "0x0";
         }
-        if (blockTag === "latest" || blockTag === "pending") {
-            return blockTag;
+        switch (blockTag) {
+            case "earliest": return "0x0";
+            case "latest":
+            case "pending":
+            case "safe":
+            case "finalized":
+                return blockTag;
         }
         if (typeof (blockTag) === "number" || (0, bytes_1.isHexString)(blockTag)) {
             return (0, bytes_1.hexValue)(blockTag);
@@ -12889,10 +18554,10 @@ function showThrottleMessage() {
 }
 exports.showThrottleMessage = showThrottleMessage;
 
-},{"./_version":64,"@ethersproject/address":24,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/constants":37,"@ethersproject/logger":57,"@ethersproject/properties":63,"@ethersproject/transactions":103}],73:[function(require,module,exports){
+},{"./_version":69,"@ethersproject/address":25,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/constants":39,"@ethersproject/logger":62,"@ethersproject/properties":68,"@ethersproject/transactions":109}],79:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Formatter = exports.showThrottleMessage = exports.isCommunityResourcable = exports.isCommunityResource = exports.getNetwork = exports.getDefaultProvider = exports.JsonRpcSigner = exports.IpcProvider = exports.WebSocketProvider = exports.Web3Provider = exports.StaticJsonRpcProvider = exports.PocketProvider = exports.NodesmithProvider = exports.JsonRpcBatchProvider = exports.JsonRpcProvider = exports.InfuraWebSocketProvider = exports.InfuraProvider = exports.EtherscanProvider = exports.CloudflareProvider = exports.AlchemyWebSocketProvider = exports.AlchemyProvider = exports.FallbackProvider = exports.UrlJsonRpcProvider = exports.Resolver = exports.BaseProvider = exports.Provider = void 0;
+exports.Formatter = exports.showThrottleMessage = exports.isCommunityResourcable = exports.isCommunityResource = exports.getNetwork = exports.getDefaultProvider = exports.JsonRpcSigner = exports.IpcProvider = exports.WebSocketProvider = exports.Web3Provider = exports.StaticJsonRpcProvider = exports.PocketProvider = exports.NodesmithProvider = exports.JsonRpcBatchProvider = exports.JsonRpcProvider = exports.InfuraWebSocketProvider = exports.InfuraProvider = exports.EtherscanProvider = exports.CloudflareProvider = exports.AnkrProvider = exports.AlchemyWebSocketProvider = exports.AlchemyProvider = exports.FallbackProvider = exports.UrlJsonRpcProvider = exports.Resolver = exports.BaseProvider = exports.Provider = void 0;
 var abstract_provider_1 = require("@ethersproject/abstract-provider");
 Object.defineProperty(exports, "Provider", { enumerable: true, get: function () { return abstract_provider_1.Provider; } });
 var networks_1 = require("@ethersproject/networks");
@@ -12903,6 +18568,8 @@ Object.defineProperty(exports, "Resolver", { enumerable: true, get: function () 
 var alchemy_provider_1 = require("./alchemy-provider");
 Object.defineProperty(exports, "AlchemyProvider", { enumerable: true, get: function () { return alchemy_provider_1.AlchemyProvider; } });
 Object.defineProperty(exports, "AlchemyWebSocketProvider", { enumerable: true, get: function () { return alchemy_provider_1.AlchemyWebSocketProvider; } });
+var ankr_provider_1 = require("./ankr-provider");
+Object.defineProperty(exports, "AnkrProvider", { enumerable: true, get: function () { return ankr_provider_1.AnkrProvider; } });
 var cloudflare_provider_1 = require("./cloudflare-provider");
 Object.defineProperty(exports, "CloudflareProvider", { enumerable: true, get: function () { return cloudflare_provider_1.CloudflareProvider; } });
 var etherscan_provider_1 = require("./etherscan-provider");
@@ -12950,10 +18617,12 @@ function getDefaultProvider(network, options) {
         // Handle http and ws (and their secure variants)
         var match = network.match(/^(ws|http)s?:/i);
         if (match) {
-            switch (match[1]) {
+            switch (match[1].toLowerCase()) {
                 case "http":
+                case "https":
                     return new json_rpc_provider_1.JsonRpcProvider(network);
                 case "ws":
+                case "wss":
                     return new websocket_provider_1.WebSocketProvider(network);
                 default:
                     logger.throwArgumentError("unsupported URL scheme", "network", network);
@@ -12970,6 +18639,7 @@ function getDefaultProvider(network, options) {
     return n._defaultProvider({
         FallbackProvider: fallback_provider_1.FallbackProvider,
         AlchemyProvider: alchemy_provider_1.AlchemyProvider,
+        AnkrProvider: ankr_provider_1.AnkrProvider,
         CloudflareProvider: cloudflare_provider_1.CloudflareProvider,
         EtherscanProvider: etherscan_provider_1.EtherscanProvider,
         InfuraProvider: infura_provider_1.InfuraProvider,
@@ -12982,7 +18652,7 @@ function getDefaultProvider(network, options) {
 }
 exports.getDefaultProvider = getDefaultProvider;
 
-},{"./_version":64,"./alchemy-provider":65,"./base-provider":66,"./cloudflare-provider":69,"./etherscan-provider":70,"./fallback-provider":71,"./formatter":72,"./infura-provider":74,"./ipc-provider":67,"./json-rpc-batch-provider":75,"./json-rpc-provider":76,"./nodesmith-provider":77,"./pocket-provider":78,"./url-json-rpc-provider":79,"./web3-provider":80,"./websocket-provider":81,"@ethersproject/abstract-provider":20,"@ethersproject/logger":57,"@ethersproject/networks":59}],74:[function(require,module,exports){
+},{"./_version":69,"./alchemy-provider":70,"./ankr-provider":71,"./base-provider":72,"./cloudflare-provider":75,"./etherscan-provider":76,"./fallback-provider":77,"./formatter":78,"./infura-provider":80,"./ipc-provider":73,"./json-rpc-batch-provider":81,"./json-rpc-provider":82,"./nodesmith-provider":83,"./pocket-provider":84,"./url-json-rpc-provider":85,"./web3-provider":86,"./websocket-provider":87,"@ethersproject/abstract-provider":21,"@ethersproject/logger":62,"@ethersproject/networks":64}],80:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -13071,17 +18741,11 @@ var InfuraProvider = /** @class */ (function (_super) {
             case "homestead":
                 host = "mainnet.infura.io";
                 break;
-            case "ropsten":
-                host = "ropsten.infura.io";
-                break;
-            case "rinkeby":
-                host = "rinkeby.infura.io";
-                break;
-            case "kovan":
-                host = "kovan.infura.io";
-                break;
             case "goerli":
                 host = "goerli.infura.io";
+                break;
+            case "sepolia":
+                host = "sepolia.infura.io";
                 break;
             case "matic":
                 host = "polygon-mainnet.infura.io";
@@ -13092,14 +18756,14 @@ var InfuraProvider = /** @class */ (function (_super) {
             case "optimism":
                 host = "optimism-mainnet.infura.io";
                 break;
-            case "optimism-kovan":
-                host = "optimism-kovan.infura.io";
+            case "optimism-goerli":
+                host = "optimism-goerli.infura.io";
                 break;
             case "arbitrum":
                 host = "arbitrum-mainnet.infura.io";
                 break;
-            case "arbitrum-rinkeby":
-                host = "arbitrum-rinkeby.infura.io";
+            case "arbitrum-goerli":
+                host = "arbitrum-goerli.infura.io";
                 break;
             default:
                 logger.throwError("unsupported network", logger_1.Logger.errors.INVALID_ARGUMENT, {
@@ -13130,7 +18794,7 @@ var InfuraProvider = /** @class */ (function (_super) {
 }(url_json_rpc_provider_1.UrlJsonRpcProvider));
 exports.InfuraProvider = InfuraProvider;
 
-},{"./_version":64,"./formatter":72,"./url-json-rpc-provider":79,"./websocket-provider":81,"@ethersproject/logger":57,"@ethersproject/properties":63}],75:[function(require,module,exports){
+},{"./_version":69,"./formatter":78,"./url-json-rpc-provider":85,"./websocket-provider":87,"@ethersproject/logger":62,"@ethersproject/properties":68}],81:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -13230,7 +18894,7 @@ var JsonRpcBatchProvider = /** @class */ (function (_super) {
 }(json_rpc_provider_1.JsonRpcProvider));
 exports.JsonRpcBatchProvider = JsonRpcBatchProvider;
 
-},{"./json-rpc-provider":76,"@ethersproject/properties":63,"@ethersproject/web":110}],76:[function(require,module,exports){
+},{"./json-rpc-provider":82,"@ethersproject/properties":68,"@ethersproject/web":116}],82:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -13298,19 +18962,69 @@ var _version_1 = require("./_version");
 var logger = new logger_1.Logger(_version_1.version);
 var base_provider_1 = require("./base-provider");
 var errorGas = ["call", "estimateGas"];
+function spelunk(value, requireData) {
+    if (value == null) {
+        return null;
+    }
+    // These *are* the droids we're looking for.
+    if (typeof (value.message) === "string" && value.message.match("reverted")) {
+        var data = (0, bytes_1.isHexString)(value.data) ? value.data : null;
+        if (!requireData || data) {
+            return { message: value.message, data: data };
+        }
+    }
+    // Spelunk further...
+    if (typeof (value) === "object") {
+        for (var key in value) {
+            var result = spelunk(value[key], requireData);
+            if (result) {
+                return result;
+            }
+        }
+        return null;
+    }
+    // Might be a JSON string we can further descend...
+    if (typeof (value) === "string") {
+        try {
+            return spelunk(JSON.parse(value), requireData);
+        }
+        catch (error) { }
+    }
+    return null;
+}
 function checkError(method, error, params) {
+    var transaction = params.transaction || params.signedTransaction;
     // Undo the "convenience" some nodes are attempting to prevent backwards
     // incompatibility; maybe for v6 consider forwarding reverts as errors
-    if (method === "call" && error.code === logger_1.Logger.errors.SERVER_ERROR) {
-        var e = error.error;
-        if (e && e.message.match("reverted") && (0, bytes_1.isHexString)(e.data)) {
-            return e.data;
+    if (method === "call") {
+        var result = spelunk(error, true);
+        if (result) {
+            return result.data;
         }
-        logger.throwError("missing revert data in call exception", logger_1.Logger.errors.CALL_EXCEPTION, {
-            error: error,
-            data: "0x"
+        // Nothing descriptive..
+        logger.throwError("missing revert data in call exception; Transaction reverted without a reason string", logger_1.Logger.errors.CALL_EXCEPTION, {
+            data: "0x",
+            transaction: transaction,
+            error: error
         });
     }
+    if (method === "estimateGas") {
+        // Try to find something, with a preference on SERVER_ERROR body
+        var result = spelunk(error.body, false);
+        if (result == null) {
+            result = spelunk(error, false);
+        }
+        // Found "reverted", this is a CALL_EXCEPTION
+        if (result) {
+            logger.throwError("cannot estimate gas; transaction may fail or may require manual gas limit", logger_1.Logger.errors.UNPREDICTABLE_GAS_LIMIT, {
+                reason: result.message,
+                method: method,
+                transaction: transaction,
+                error: error
+            });
+        }
+    }
+    // @TODO: Should we spelunk for message too?
     var message = error.message;
     if (error.code === logger_1.Logger.errors.SERVER_ERROR && error.error && typeof (error.error.message) === "string") {
         message = error.error.message;
@@ -13322,9 +19036,8 @@ function checkError(method, error, params) {
         message = error.responseText;
     }
     message = (message || "").toLowerCase();
-    var transaction = params.transaction || params.signedTransaction;
     // "insufficient funds for gas * price + value + cost(data)"
-    if (message.match(/insufficient funds|base fee exceeds gas limit/)) {
+    if (message.match(/insufficient funds|base fee exceeds gas limit|InsufficientFunds/i)) {
         logger.throwError("insufficient funds for intrinsic transaction cost", logger_1.Logger.errors.INSUFFICIENT_FUNDS, {
             error: error,
             method: method,
@@ -13332,7 +19045,7 @@ function checkError(method, error, params) {
         });
     }
     // "nonce too low"
-    if (message.match(/nonce too low/)) {
+    if (message.match(/nonce (is )?too low/i)) {
         logger.throwError("nonce has already been used", logger_1.Logger.errors.NONCE_EXPIRED, {
             error: error,
             method: method,
@@ -13340,7 +19053,7 @@ function checkError(method, error, params) {
         });
     }
     // "replacement transaction underpriced"
-    if (message.match(/replacement transaction underpriced/)) {
+    if (message.match(/replacement transaction underpriced|transaction gas price.*too low/i)) {
         logger.throwError("replacement fee too low", logger_1.Logger.errors.REPLACEMENT_UNDERPRICED, {
             error: error,
             method: method,
@@ -13348,14 +19061,14 @@ function checkError(method, error, params) {
         });
     }
     // "replacement transaction underpriced"
-    if (message.match(/only replay-protected/)) {
+    if (message.match(/only replay-protected/i)) {
         logger.throwError("legacy pre-eip-155 transactions not supported", logger_1.Logger.errors.UNSUPPORTED_OPERATION, {
             error: error,
             method: method,
             transaction: transaction
         });
     }
-    if (errorGas.indexOf(method) >= 0 && message.match(/gas required exceeds allowance|always failing transaction|execution reverted/)) {
+    if (errorGas.indexOf(method) >= 0 && message.match(/gas required exceeds allowance|always failing transaction|execution reverted|revert/)) {
         logger.throwError("cannot estimate gas; transaction may fail or may require manual gas limit", logger_1.Logger.errors.UNPREDICTABLE_GAS_LIMIT, {
             error: error,
             method: method,
@@ -13389,10 +19102,7 @@ var _constructorGuard = {};
 var JsonRpcSigner = /** @class */ (function (_super) {
     __extends(JsonRpcSigner, _super);
     function JsonRpcSigner(constructorGuard, provider, addressOrIndex) {
-        var _newTarget = this.constructor;
-        var _this = this;
-        logger.checkNew(_newTarget, JsonRpcSigner);
-        _this = _super.call(this) || this;
+        var _this = _super.call(this) || this;
         if (constructorGuard !== _constructorGuard) {
             throw new Error("do not call the JsonRpcSigner constructor directly; use provider.getSigner");
         }
@@ -13489,6 +19199,12 @@ var JsonRpcSigner = /** @class */ (function (_super) {
             return _this.provider.send("eth_sendTransaction", [hexTx]).then(function (hash) {
                 return hash;
             }, function (error) {
+                if (typeof (error.message) === "string" && error.message.match(/user denied/i)) {
+                    logger.throwError("user rejected transaction", logger_1.Logger.errors.ACTION_REJECTED, {
+                        action: "sendTransaction",
+                        transaction: tx
+                    });
+                }
                 return checkError("sendTransaction", error, hexTx);
             });
         });
@@ -13543,7 +19259,7 @@ var JsonRpcSigner = /** @class */ (function (_super) {
     };
     JsonRpcSigner.prototype.signMessage = function (message) {
         return __awaiter(this, void 0, void 0, function () {
-            var data, address;
+            var data, address, error_2;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
@@ -13551,15 +19267,29 @@ var JsonRpcSigner = /** @class */ (function (_super) {
                         return [4 /*yield*/, this.getAddress()];
                     case 1:
                         address = _a.sent();
+                        _a.label = 2;
+                    case 2:
+                        _a.trys.push([2, 4, , 5]);
                         return [4 /*yield*/, this.provider.send("personal_sign", [(0, bytes_1.hexlify)(data), address.toLowerCase()])];
-                    case 2: return [2 /*return*/, _a.sent()];
+                    case 3: return [2 /*return*/, _a.sent()];
+                    case 4:
+                        error_2 = _a.sent();
+                        if (typeof (error_2.message) === "string" && error_2.message.match(/user denied/i)) {
+                            logger.throwError("user rejected signing", logger_1.Logger.errors.ACTION_REJECTED, {
+                                action: "signMessage",
+                                from: address,
+                                messageData: message
+                            });
+                        }
+                        throw error_2;
+                    case 5: return [2 /*return*/];
                 }
             });
         });
     };
     JsonRpcSigner.prototype._legacySignMessage = function (message) {
         return __awaiter(this, void 0, void 0, function () {
-            var data, address;
+            var data, address, error_3;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
@@ -13567,17 +19297,31 @@ var JsonRpcSigner = /** @class */ (function (_super) {
                         return [4 /*yield*/, this.getAddress()];
                     case 1:
                         address = _a.sent();
+                        _a.label = 2;
+                    case 2:
+                        _a.trys.push([2, 4, , 5]);
                         return [4 /*yield*/, this.provider.send("eth_sign", [address.toLowerCase(), (0, bytes_1.hexlify)(data)])];
-                    case 2: 
+                    case 3: 
                     // https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_sign
                     return [2 /*return*/, _a.sent()];
+                    case 4:
+                        error_3 = _a.sent();
+                        if (typeof (error_3.message) === "string" && error_3.message.match(/user denied/i)) {
+                            logger.throwError("user rejected signing", logger_1.Logger.errors.ACTION_REJECTED, {
+                                action: "_legacySignMessage",
+                                from: address,
+                                messageData: message
+                            });
+                        }
+                        throw error_3;
+                    case 5: return [2 /*return*/];
                 }
             });
         });
     };
     JsonRpcSigner.prototype._signTypedData = function (domain, types, value) {
         return __awaiter(this, void 0, void 0, function () {
-            var populated, address;
+            var populated, address, error_4;
             var _this = this;
             return __generator(this, function (_a) {
                 switch (_a.label) {
@@ -13589,11 +19333,25 @@ var JsonRpcSigner = /** @class */ (function (_super) {
                         return [4 /*yield*/, this.getAddress()];
                     case 2:
                         address = _a.sent();
+                        _a.label = 3;
+                    case 3:
+                        _a.trys.push([3, 5, , 6]);
                         return [4 /*yield*/, this.provider.send("eth_signTypedData_v4", [
                                 address.toLowerCase(),
                                 JSON.stringify(hash_1._TypedDataEncoder.getPayload(populated.domain, types, populated.value))
                             ])];
-                    case 3: return [2 /*return*/, _a.sent()];
+                    case 4: return [2 /*return*/, _a.sent()];
+                    case 5:
+                        error_4 = _a.sent();
+                        if (typeof (error_4.message) === "string" && error_4.message.match(/user denied/i)) {
+                            logger.throwError("user rejected signing", logger_1.Logger.errors.ACTION_REJECTED, {
+                                action: "_signTypedData",
+                                from: address,
+                                messageData: { domain: populated.domain, types: types, value: populated.value }
+                            });
+                        }
+                        throw error_4;
+                    case 6: return [2 /*return*/];
                 }
             });
         });
@@ -13648,9 +19406,7 @@ var allowedTransactionKeys = {
 var JsonRpcProvider = /** @class */ (function (_super) {
     __extends(JsonRpcProvider, _super);
     function JsonRpcProvider(url, network) {
-        var _newTarget = this.constructor;
         var _this = this;
-        logger.checkNew(_newTarget, JsonRpcProvider);
         var networkOrReady = network;
         // The network is unknown, query the JSON-RPC for it
         if (networkOrReady == null) {
@@ -13706,7 +19462,7 @@ var JsonRpcProvider = /** @class */ (function (_super) {
     };
     JsonRpcProvider.prototype._uncachedDetectNetwork = function () {
         return __awaiter(this, void 0, void 0, function () {
-            var chainId, error_2, error_3, getNetwork;
+            var chainId, error_5, error_6, getNetwork;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0: return [4 /*yield*/, timer(0)];
@@ -13721,7 +19477,7 @@ var JsonRpcProvider = /** @class */ (function (_super) {
                         chainId = _a.sent();
                         return [3 /*break*/, 9];
                     case 4:
-                        error_2 = _a.sent();
+                        error_5 = _a.sent();
                         _a.label = 5;
                     case 5:
                         _a.trys.push([5, 7, , 8]);
@@ -13730,7 +19486,7 @@ var JsonRpcProvider = /** @class */ (function (_super) {
                         chainId = _a.sent();
                         return [3 /*break*/, 8];
                     case 7:
-                        error_3 = _a.sent();
+                        error_6 = _a.sent();
                         return [3 /*break*/, 8];
                     case 8: return [3 /*break*/, 9];
                     case 9:
@@ -13824,7 +19580,7 @@ var JsonRpcProvider = /** @class */ (function (_super) {
             case "getCode":
                 return ["eth_getCode", [getLowerCase(params.address), params.blockTag]];
             case "getStorageAt":
-                return ["eth_getStorageAt", [getLowerCase(params.address), params.position, params.blockTag]];
+                return ["eth_getStorageAt", [getLowerCase(params.address), (0, bytes_1.hexZeroPad)(params.position, 32), params.blockTag]];
             case "sendTransaction":
                 return ["eth_sendRawTransaction", [params.signedTransaction]];
             case "getBlock":
@@ -13859,7 +19615,7 @@ var JsonRpcProvider = /** @class */ (function (_super) {
     };
     JsonRpcProvider.prototype.perform = function (method, params) {
         return __awaiter(this, void 0, void 0, function () {
-            var tx, feeData, args, error_4;
+            var tx, feeData, args, error_7;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
@@ -13888,8 +19644,8 @@ var JsonRpcProvider = /** @class */ (function (_super) {
                         return [4 /*yield*/, this.send(args[0], args[1])];
                     case 4: return [2 /*return*/, _a.sent()];
                     case 5:
-                        error_4 = _a.sent();
-                        return [2 /*return*/, checkError(method, error_4, params)];
+                        error_7 = _a.sent();
+                        return [2 /*return*/, checkError(method, error_7, params)];
                     case 6: return [2 /*return*/];
                 }
             });
@@ -13968,12 +19724,12 @@ var JsonRpcProvider = /** @class */ (function (_super) {
         }
         (0, properties_1.checkProperties)(transaction, allowed);
         var result = {};
-        // Some nodes (INFURA ropsten; INFURA mainnet is fine) do not like leading zeros.
-        ["gasLimit", "gasPrice", "type", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "value"].forEach(function (key) {
+        // JSON-RPC now requires numeric values to be "quantity" values
+        ["chainId", "gasLimit", "gasPrice", "type", "maxFeePerGas", "maxPriorityFeePerGas", "nonce", "value"].forEach(function (key) {
             if (transaction[key] == null) {
                 return;
             }
-            var value = (0, bytes_1.hexValue)(transaction[key]);
+            var value = (0, bytes_1.hexValue)(bignumber_1.BigNumber.from(transaction[key]));
             if (key === "gasLimit") {
                 key = "gas";
             }
@@ -13994,7 +19750,7 @@ var JsonRpcProvider = /** @class */ (function (_super) {
 }(base_provider_1.BaseProvider));
 exports.JsonRpcProvider = JsonRpcProvider;
 
-},{"./_version":64,"./base-provider":66,"@ethersproject/abstract-signer":22,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/hash":43,"@ethersproject/logger":57,"@ethersproject/properties":63,"@ethersproject/strings":100,"@ethersproject/transactions":103,"@ethersproject/web":110}],77:[function(require,module,exports){
+},{"./_version":69,"./base-provider":72,"@ethersproject/abstract-signer":23,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/hash":48,"@ethersproject/logger":62,"@ethersproject/properties":68,"@ethersproject/strings":106,"@ethersproject/transactions":109,"@ethersproject/web":116}],83:[function(require,module,exports){
 /* istanbul ignore file */
 "use strict";
 var __extends = (this && this.__extends) || (function () {
@@ -14059,7 +19815,7 @@ var NodesmithProvider = /** @class */ (function (_super) {
 }(url_json_rpc_provider_1.UrlJsonRpcProvider));
 exports.NodesmithProvider = NodesmithProvider;
 
-},{"./_version":64,"./url-json-rpc-provider":79,"@ethersproject/logger":57}],78:[function(require,module,exports){
+},{"./_version":69,"./url-json-rpc-provider":85,"@ethersproject/logger":62}],84:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -14078,74 +19834,35 @@ var __extends = (this && this.__extends) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PocketProvider = void 0;
-var properties_1 = require("@ethersproject/properties");
 var logger_1 = require("@ethersproject/logger");
 var _version_1 = require("./_version");
 var logger = new logger_1.Logger(_version_1.version);
 var url_json_rpc_provider_1 = require("./url-json-rpc-provider");
-// These are load-balancer-based application IDs
-var defaultApplicationIds = {
-    homestead: "6004bcd10040261633ade990",
-    ropsten: "6004bd4d0040261633ade991",
-    rinkeby: "6004bda20040261633ade994",
-    goerli: "6004bd860040261633ade992",
-};
+var defaultApplicationId = "62e1ad51b37b8e00394bda3b";
 var PocketProvider = /** @class */ (function (_super) {
     __extends(PocketProvider, _super);
-    function PocketProvider(network, apiKey) {
-        // We need a bit of creativity in the constructor because
-        // Pocket uses different default API keys based on the network
-        var _newTarget = this.constructor;
-        var _this = this;
-        if (apiKey == null) {
-            var n = (0, properties_1.getStatic)(_newTarget, "getNetwork")(network);
-            if (n) {
-                var applicationId = defaultApplicationIds[n.name];
-                if (applicationId) {
-                    apiKey = {
-                        applicationId: applicationId,
-                        loadBalancer: true
-                    };
-                }
-            }
-            // If there was any issue above, we don't know this network
-            if (apiKey == null) {
-                logger.throwError("unsupported network", logger_1.Logger.errors.INVALID_ARGUMENT, {
-                    argument: "network",
-                    value: network
-                });
-            }
-        }
-        _this = _super.call(this, network, apiKey) || this;
-        return _this;
+    function PocketProvider() {
+        return _super !== null && _super.apply(this, arguments) || this;
     }
     PocketProvider.getApiKey = function (apiKey) {
-        // Most API Providers allow null to get the default configuration, but
-        // Pocket requires the network to decide the default provider, so we
-        // rely on hijacking the constructor to add a sensible default for us
-        if (apiKey == null) {
-            logger.throwArgumentError("PocketProvider.getApiKey does not support null apiKey", "apiKey", apiKey);
-        }
         var apiKeyObj = {
             applicationId: null,
-            loadBalancer: false,
+            loadBalancer: true,
             applicationSecretKey: null
         };
         // Parse applicationId and applicationSecretKey
-        if (typeof (apiKey) === "string") {
+        if (apiKey == null) {
+            apiKeyObj.applicationId = defaultApplicationId;
+        }
+        else if (typeof (apiKey) === "string") {
             apiKeyObj.applicationId = apiKey;
         }
         else if (apiKey.applicationSecretKey != null) {
-            logger.assertArgument((typeof (apiKey.applicationId) === "string"), "applicationSecretKey requires an applicationId", "applicationId", apiKey.applicationId);
-            logger.assertArgument((typeof (apiKey.applicationSecretKey) === "string"), "invalid applicationSecretKey", "applicationSecretKey", "[REDACTED]");
             apiKeyObj.applicationId = apiKey.applicationId;
             apiKeyObj.applicationSecretKey = apiKey.applicationSecretKey;
-            apiKeyObj.loadBalancer = !!apiKey.loadBalancer;
         }
         else if (apiKey.applicationId) {
-            logger.assertArgument((typeof (apiKey.applicationId) === "string"), "apiKey.applicationId must be a string", "apiKey.applicationId", apiKey.applicationId);
             apiKeyObj.applicationId = apiKey.applicationId;
-            apiKeyObj.loadBalancer = !!apiKey.loadBalancer;
         }
         else {
             logger.throwArgumentError("unsupported PocketProvider apiKey", "apiKey", apiKey);
@@ -14155,17 +19872,26 @@ var PocketProvider = /** @class */ (function (_super) {
     PocketProvider.getUrl = function (network, apiKey) {
         var host = null;
         switch (network ? network.name : "unknown") {
+            case "goerli":
+                host = "eth-goerli.gateway.pokt.network";
+                break;
             case "homestead":
                 host = "eth-mainnet.gateway.pokt.network";
                 break;
-            case "ropsten":
-                host = "eth-ropsten.gateway.pokt.network";
+            case "kovan":
+                host = "poa-kovan.gateway.pokt.network";
+                break;
+            case "matic":
+                host = "poly-mainnet.gateway.pokt.network";
+                break;
+            case "maticmum":
+                host = "polygon-mumbai-rpc.gateway.pokt.network";
                 break;
             case "rinkeby":
                 host = "eth-rinkeby.gateway.pokt.network";
                 break;
-            case "goerli":
-                host = "eth-goerli.gateway.pokt.network";
+            case "ropsten":
+                host = "eth-ropsten.gateway.pokt.network";
                 break;
             default:
                 logger.throwError("unsupported network", logger_1.Logger.errors.INVALID_ARGUMENT, {
@@ -14173,17 +19899,8 @@ var PocketProvider = /** @class */ (function (_super) {
                     value: network
                 });
         }
-        var url = null;
-        if (apiKey.loadBalancer) {
-            url = "https://" + host + "/v1/lb/" + apiKey.applicationId;
-        }
-        else {
-            url = "https://" + host + "/v1/" + apiKey.applicationId;
-        }
-        var connection = { url: url };
-        // Initialize empty headers
-        connection.headers = {};
-        // Apply application secret key
+        var url = "https://" + host + "/v1/lb/" + apiKey.applicationId;
+        var connection = { headers: {}, url: url };
         if (apiKey.applicationSecretKey != null) {
             connection.user = "";
             connection.password = apiKey.applicationSecretKey;
@@ -14191,13 +19908,13 @@ var PocketProvider = /** @class */ (function (_super) {
         return connection;
     };
     PocketProvider.prototype.isCommunityResource = function () {
-        return (this.applicationId === defaultApplicationIds[this.network.name]);
+        return (this.applicationId === defaultApplicationId);
     };
     return PocketProvider;
 }(url_json_rpc_provider_1.UrlJsonRpcProvider));
 exports.PocketProvider = PocketProvider;
 
-},{"./_version":64,"./url-json-rpc-provider":79,"@ethersproject/logger":57,"@ethersproject/properties":63}],79:[function(require,module,exports){
+},{"./_version":69,"./url-json-rpc-provider":85,"@ethersproject/logger":62}],85:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -14351,7 +20068,7 @@ var UrlJsonRpcProvider = /** @class */ (function (_super) {
 }(StaticJsonRpcProvider));
 exports.UrlJsonRpcProvider = UrlJsonRpcProvider;
 
-},{"./_version":64,"./json-rpc-provider":76,"@ethersproject/logger":57,"@ethersproject/properties":63}],80:[function(require,module,exports){
+},{"./_version":69,"./json-rpc-provider":82,"@ethersproject/logger":62,"@ethersproject/properties":68}],86:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -14459,9 +20176,7 @@ function buildEip1193Fetcher(provider) {
 var Web3Provider = /** @class */ (function (_super) {
     __extends(Web3Provider, _super);
     function Web3Provider(provider, network) {
-        var _newTarget = this.constructor;
         var _this = this;
-        logger.checkNew(_newTarget, Web3Provider);
         if (provider == null) {
             logger.throwArgumentError("missing provider", "provider", provider);
         }
@@ -14509,7 +20224,7 @@ var Web3Provider = /** @class */ (function (_super) {
 }(json_rpc_provider_1.JsonRpcProvider));
 exports.Web3Provider = Web3Provider;
 
-},{"./_version":64,"./json-rpc-provider":76,"@ethersproject/logger":57,"@ethersproject/properties":63}],81:[function(require,module,exports){
+},{"./_version":69,"./json-rpc-provider":82,"@ethersproject/logger":62,"@ethersproject/properties":68}],87:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -14598,22 +20313,32 @@ var WebSocketProvider = /** @class */ (function (_super) {
                 operation: "network:any"
             });
         }
-        _this = _super.call(this, url, network) || this;
+        if (typeof (url) === "string") {
+            _this = _super.call(this, url, network) || this;
+        }
+        else {
+            _this = _super.call(this, "_websocket", network) || this;
+        }
         _this._pollingInterval = -1;
         _this._wsReady = false;
-        (0, properties_1.defineReadOnly)(_this, "_websocket", new ws_1.WebSocket(_this.connection.url));
+        if (typeof (url) === "string") {
+            (0, properties_1.defineReadOnly)(_this, "_websocket", new ws_1.WebSocket(_this.connection.url));
+        }
+        else {
+            (0, properties_1.defineReadOnly)(_this, "_websocket", url);
+        }
         (0, properties_1.defineReadOnly)(_this, "_requests", {});
         (0, properties_1.defineReadOnly)(_this, "_subs", {});
         (0, properties_1.defineReadOnly)(_this, "_subIds", {});
         (0, properties_1.defineReadOnly)(_this, "_detectNetwork", _super.prototype.detectNetwork.call(_this));
         // Stall sending requests until the socket is open...
-        _this._websocket.onopen = function () {
+        _this.websocket.onopen = function () {
             _this._wsReady = true;
             Object.keys(_this._requests).forEach(function (id) {
-                _this._websocket.send(_this._requests[id].payload);
+                _this.websocket.send(_this._requests[id].payload);
             });
         };
-        _this._websocket.onmessage = function (messageEvent) {
+        _this.websocket.onmessage = function (messageEvent) {
             var data = messageEvent.data;
             var result = JSON.parse(data);
             if (result.id != null) {
@@ -14671,6 +20396,13 @@ var WebSocketProvider = /** @class */ (function (_super) {
         }
         return _this;
     }
+    Object.defineProperty(WebSocketProvider.prototype, "websocket", {
+        // Cannot narrow the type of _websocket, as that is not backwards compatible
+        // so we add a getter and let the WebSocket be a public API.
+        get: function () { return this._websocket; },
+        enumerable: false,
+        configurable: true
+    });
     WebSocketProvider.prototype.detectNetwork = function () {
         return this._detectNetwork;
     };
@@ -14733,7 +20465,7 @@ var WebSocketProvider = /** @class */ (function (_super) {
             });
             _this._requests[String(rid)] = { callback: callback, payload: payload };
             if (_this._wsReady) {
-                _this._websocket.send(payload);
+                _this.websocket.send(payload);
             }
         });
     };
@@ -14852,12 +20584,12 @@ var WebSocketProvider = /** @class */ (function (_super) {
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
-                        if (!(this._websocket.readyState === ws_1.WebSocket.CONNECTING)) return [3 /*break*/, 2];
+                        if (!(this.websocket.readyState === ws_1.WebSocket.CONNECTING)) return [3 /*break*/, 2];
                         return [4 /*yield*/, (new Promise(function (resolve) {
-                                _this._websocket.onopen = function () {
+                                _this.websocket.onopen = function () {
                                     resolve(true);
                                 };
-                                _this._websocket.onerror = function () {
+                                _this.websocket.onerror = function () {
                                     resolve(false);
                                 };
                             }))];
@@ -14867,7 +20599,7 @@ var WebSocketProvider = /** @class */ (function (_super) {
                     case 2:
                         // Hangup
                         // See: https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent#Status_codes
-                        this._websocket.close(1000);
+                        this.websocket.close(1000);
                         return [2 /*return*/];
                 }
             });
@@ -14877,13 +20609,13 @@ var WebSocketProvider = /** @class */ (function (_super) {
 }(json_rpc_provider_1.JsonRpcProvider));
 exports.WebSocketProvider = WebSocketProvider;
 
-},{"./_version":64,"./json-rpc-provider":76,"./ws":68,"@ethersproject/bignumber":31,"@ethersproject/logger":57,"@ethersproject/properties":63}],82:[function(require,module,exports){
+},{"./_version":69,"./json-rpc-provider":82,"./ws":74,"@ethersproject/bignumber":32,"@ethersproject/logger":62,"@ethersproject/properties":68}],88:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "random/5.5.1";
+exports.version = "random/5.7.0";
 
-},{}],83:[function(require,module,exports){
+},{}],89:[function(require,module,exports){
 (function (global){(function (){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -14932,7 +20664,7 @@ exports.randomBytes = randomBytes;
 ;
 
 }).call(this)}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./_version":82,"@ethersproject/bytes":33,"@ethersproject/logger":57}],84:[function(require,module,exports){
+},{"./_version":88,"@ethersproject/bytes":35,"@ethersproject/logger":62}],90:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.shuffled = exports.randomBytes = void 0;
@@ -14941,7 +20673,7 @@ Object.defineProperty(exports, "randomBytes", { enumerable: true, get: function 
 var shuffle_1 = require("./shuffle");
 Object.defineProperty(exports, "shuffled", { enumerable: true, get: function () { return shuffle_1.shuffled; } });
 
-},{"./random":83,"./shuffle":85}],85:[function(require,module,exports){
+},{"./random":89,"./shuffle":91}],91:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.shuffled = void 0;
@@ -14957,13 +20689,13 @@ function shuffled(array) {
 }
 exports.shuffled = shuffled;
 
-},{}],86:[function(require,module,exports){
+},{}],92:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "rlp/5.5.0";
+exports.version = "rlp/5.7.0";
 
-},{}],87:[function(require,module,exports){
+},{}],93:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.decode = exports.encode = void 0;
@@ -15088,13 +20820,13 @@ function decode(data) {
 }
 exports.decode = decode;
 
-},{"./_version":86,"@ethersproject/bytes":33,"@ethersproject/logger":57}],88:[function(require,module,exports){
+},{"./_version":92,"@ethersproject/bytes":35,"@ethersproject/logger":62}],94:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "sha2/5.5.0";
+exports.version = "sha2/5.7.0";
 
-},{}],89:[function(require,module,exports){
+},{}],95:[function(require,module,exports){
 "use strict";
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -15131,7 +20863,7 @@ function computeHmac(algorithm, key, data) {
 }
 exports.computeHmac = computeHmac;
 
-},{"./_version":88,"./types":91,"@ethersproject/bytes":33,"@ethersproject/logger":57,"hash.js":152}],90:[function(require,module,exports){
+},{"./_version":94,"./types":97,"@ethersproject/bytes":35,"@ethersproject/logger":62,"hash.js":158}],96:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SupportedAlgorithm = exports.sha512 = exports.sha256 = exports.ripemd160 = exports.computeHmac = void 0;
@@ -15143,7 +20875,7 @@ Object.defineProperty(exports, "sha512", { enumerable: true, get: function () { 
 var types_1 = require("./types");
 Object.defineProperty(exports, "SupportedAlgorithm", { enumerable: true, get: function () { return types_1.SupportedAlgorithm; } });
 
-},{"./sha2":89,"./types":91}],91:[function(require,module,exports){
+},{"./sha2":95,"./types":97}],97:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SupportedAlgorithm = void 0;
@@ -15154,13 +20886,13 @@ var SupportedAlgorithm;
 })(SupportedAlgorithm = exports.SupportedAlgorithm || (exports.SupportedAlgorithm = {}));
 ;
 
-},{}],92:[function(require,module,exports){
+},{}],98:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "signing-key/5.5.0";
+exports.version = "signing-key/5.7.0";
 
-},{}],93:[function(require,module,exports){
+},{}],99:[function(require,module,exports){
 "use strict";
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -15171,7 +20903,7 @@ var elliptic_1 = __importDefault(require("elliptic"));
 var EC = elliptic_1.default.ec;
 exports.EC = EC;
 
-},{"elliptic":132}],94:[function(require,module,exports){
+},{"elliptic":138}],100:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.computePublicKey = exports.recoverPublicKey = exports.SigningKey = void 0;
@@ -15192,6 +20924,9 @@ var SigningKey = /** @class */ (function () {
     function SigningKey(privateKey) {
         (0, properties_1.defineReadOnly)(this, "curve", "secp256k1");
         (0, properties_1.defineReadOnly)(this, "privateKey", (0, bytes_1.hexlify)(privateKey));
+        if ((0, bytes_1.hexDataLength)(this.privateKey) !== 32) {
+            logger.throwArgumentError("invalid private key", "privateKey", "[[ REDACTED ]]");
+        }
         var keyPair = getCurve().keyFromPrivate((0, bytes_1.arrayify)(this.privateKey));
         (0, properties_1.defineReadOnly)(this, "publicKey", "0x" + keyPair.getPublic(false, "hex"));
         (0, properties_1.defineReadOnly)(this, "compressedPublicKey", "0x" + keyPair.getPublic(true, "hex"));
@@ -15257,13 +20992,13 @@ function computePublicKey(key, compressed) {
 }
 exports.computePublicKey = computePublicKey;
 
-},{"./_version":92,"./elliptic":93,"@ethersproject/bytes":33,"@ethersproject/logger":57,"@ethersproject/properties":63}],95:[function(require,module,exports){
+},{"./_version":98,"./elliptic":99,"@ethersproject/bytes":35,"@ethersproject/logger":62,"@ethersproject/properties":68}],101:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "solidity/5.5.0";
+exports.version = "solidity/5.7.0";
 
-},{}],96:[function(require,module,exports){
+},{}],102:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sha256 = exports.keccak256 = exports.pack = void 0;
@@ -15360,13 +21095,13 @@ function sha256(types, values) {
 }
 exports.sha256 = sha256;
 
-},{"./_version":95,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/keccak256":55,"@ethersproject/logger":57,"@ethersproject/sha2":90,"@ethersproject/strings":100}],97:[function(require,module,exports){
+},{"./_version":101,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/keccak256":60,"@ethersproject/logger":62,"@ethersproject/sha2":96,"@ethersproject/strings":106}],103:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "strings/5.5.0";
+exports.version = "strings/5.7.0";
 
-},{}],98:[function(require,module,exports){
+},{}],104:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseBytes32String = exports.formatBytes32String = void 0;
@@ -15403,7 +21138,7 @@ function parseBytes32String(bytes) {
 }
 exports.parseBytes32String = parseBytes32String;
 
-},{"./utf8":101,"@ethersproject/bytes":33,"@ethersproject/constants":37}],99:[function(require,module,exports){
+},{"./utf8":107,"@ethersproject/bytes":35,"@ethersproject/constants":39}],105:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.nameprep = exports._nameprepTableC = exports._nameprepTableB2 = exports._nameprepTableA1 = void 0;
@@ -15590,15 +21325,11 @@ function nameprep(value) {
     if (name.substring(0, 1) === "-" || name.substring(2, 4) === "--" || name.substring(name.length - 1) === "-") {
         throw new Error("invalid hyphen");
     }
-    // IDNA: 4.2.4
-    if (name.length > 63) {
-        throw new Error("too long");
-    }
     return name;
 }
 exports.nameprep = nameprep;
 
-},{"./utf8":101}],100:[function(require,module,exports){
+},{"./utf8":107}],106:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.nameprep = exports.parseBytes32String = exports.formatBytes32String = exports.UnicodeNormalizationForm = exports.Utf8ErrorReason = exports.Utf8ErrorFuncs = exports.toUtf8String = exports.toUtf8CodePoints = exports.toUtf8Bytes = exports._toEscapedUtf8String = void 0;
@@ -15616,7 +21347,7 @@ Object.defineProperty(exports, "UnicodeNormalizationForm", { enumerable: true, g
 Object.defineProperty(exports, "Utf8ErrorFuncs", { enumerable: true, get: function () { return utf8_1.Utf8ErrorFuncs; } });
 Object.defineProperty(exports, "Utf8ErrorReason", { enumerable: true, get: function () { return utf8_1.Utf8ErrorReason; } });
 
-},{"./bytes32":98,"./idna":99,"./utf8":101}],101:[function(require,module,exports){
+},{"./bytes32":104,"./idna":105,"./utf8":107}],107:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.toUtf8CodePoints = exports.toUtf8String = exports._toUtf8String = exports._toEscapedUtf8String = exports.toUtf8Bytes = exports.Utf8ErrorFuncs = exports.Utf8ErrorReason = exports.UnicodeNormalizationForm = void 0;
@@ -15874,13 +21605,13 @@ function toUtf8CodePoints(str, form) {
 }
 exports.toUtf8CodePoints = toUtf8CodePoints;
 
-},{"./_version":97,"@ethersproject/bytes":33,"@ethersproject/logger":57}],102:[function(require,module,exports){
+},{"./_version":103,"@ethersproject/bytes":35,"@ethersproject/logger":62}],108:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "transactions/5.5.0";
+exports.version = "transactions/5.7.0";
 
-},{}],103:[function(require,module,exports){
+},{}],109:[function(require,module,exports){
 "use strict";
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -16160,9 +21891,7 @@ function _parseEipSignature(tx, fields, serialize) {
         var digest = (0, keccak256_1.keccak256)(serialize(tx));
         tx.from = recoverAddress(digest, { r: tx.r, s: tx.s, recoveryParam: tx.v });
     }
-    catch (error) {
-        console.log(error);
-    }
+    catch (error) { }
 }
 function _parseEip1559(payload) {
     var transaction = RLP.decode(payload.slice(1));
@@ -16239,7 +21968,7 @@ function _parse(rawTransaction) {
         tx.v = bignumber_1.BigNumber.from(transaction[6]).toNumber();
     }
     catch (error) {
-        console.log(error);
+        // @TODO: What makes snese to do? The v is too big
         return tx;
     }
     tx.r = (0, bytes_1.hexZeroPad)(transaction[7], 32);
@@ -16267,9 +21996,7 @@ function _parse(rawTransaction) {
         try {
             tx.from = recoverAddress(digest, { r: (0, bytes_1.hexlify)(tx.r), s: (0, bytes_1.hexlify)(tx.s), recoveryParam: recoveryParam });
         }
-        catch (error) {
-            console.log(error);
-        }
+        catch (error) { }
         tx.hash = (0, keccak256_1.keccak256)(rawTransaction);
     }
     tx.type = null;
@@ -16297,13 +22024,13 @@ function parse(rawTransaction) {
 }
 exports.parse = parse;
 
-},{"./_version":102,"@ethersproject/address":24,"@ethersproject/bignumber":31,"@ethersproject/bytes":33,"@ethersproject/constants":37,"@ethersproject/keccak256":55,"@ethersproject/logger":57,"@ethersproject/properties":63,"@ethersproject/rlp":87,"@ethersproject/signing-key":94}],104:[function(require,module,exports){
+},{"./_version":108,"@ethersproject/address":25,"@ethersproject/bignumber":32,"@ethersproject/bytes":35,"@ethersproject/constants":39,"@ethersproject/keccak256":60,"@ethersproject/logger":62,"@ethersproject/properties":68,"@ethersproject/rlp":93,"@ethersproject/signing-key":100}],110:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "units/5.5.0";
+exports.version = "units/5.7.0";
 
-},{}],105:[function(require,module,exports){
+},{}],111:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseEther = exports.formatEther = exports.parseUnits = exports.formatUnits = exports.commify = void 0;
@@ -16395,13 +22122,13 @@ function parseEther(ether) {
 }
 exports.parseEther = parseEther;
 
-},{"./_version":104,"@ethersproject/bignumber":31,"@ethersproject/logger":57}],106:[function(require,module,exports){
+},{"./_version":110,"@ethersproject/bignumber":32,"@ethersproject/logger":62}],112:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "wallet/5.5.0";
+exports.version = "wallet/5.7.0";
 
-},{}],107:[function(require,module,exports){
+},{}],113:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -16481,10 +22208,7 @@ function hasMnemonic(value) {
 var Wallet = /** @class */ (function (_super) {
     __extends(Wallet, _super);
     function Wallet(privateKey, provider) {
-        var _newTarget = this.constructor;
-        var _this = this;
-        logger.checkNew(_newTarget, Wallet);
-        _this = _super.call(this) || this;
+        var _this = _super.call(this) || this;
         if (isAccount(privateKey)) {
             var signingKey_1 = new signing_key_1.SigningKey(privateKey.privateKey);
             (0, properties_1.defineReadOnly)(_this, "_signingKey", function () { return signingKey_1; });
@@ -16653,13 +22377,13 @@ function verifyTypedData(domain, types, value, signature) {
 }
 exports.verifyTypedData = verifyTypedData;
 
-},{"./_version":106,"@ethersproject/abstract-provider":20,"@ethersproject/abstract-signer":22,"@ethersproject/address":24,"@ethersproject/bytes":33,"@ethersproject/hash":43,"@ethersproject/hdnode":48,"@ethersproject/json-wallets":51,"@ethersproject/keccak256":55,"@ethersproject/logger":57,"@ethersproject/properties":63,"@ethersproject/random":84,"@ethersproject/signing-key":94,"@ethersproject/transactions":103}],108:[function(require,module,exports){
+},{"./_version":112,"@ethersproject/abstract-provider":21,"@ethersproject/abstract-signer":23,"@ethersproject/address":25,"@ethersproject/bytes":35,"@ethersproject/hash":48,"@ethersproject/hdnode":53,"@ethersproject/json-wallets":56,"@ethersproject/keccak256":60,"@ethersproject/logger":62,"@ethersproject/properties":68,"@ethersproject/random":90,"@ethersproject/signing-key":100,"@ethersproject/transactions":109}],114:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "web/5.5.1";
+exports.version = "web/5.7.1";
 
-},{}],109:[function(require,module,exports){
+},{}],115:[function(require,module,exports){
 "use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -16702,7 +22426,7 @@ exports.getUrl = void 0;
 var bytes_1 = require("@ethersproject/bytes");
 function getUrl(href, options) {
     return __awaiter(this, void 0, void 0, function () {
-        var request, response, body, headers;
+        var request, opts, response, body, headers;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
@@ -16722,6 +22446,24 @@ function getUrl(href, options) {
                         request.referrer = "client"; // no-referrer, *client
                     }
                     ;
+                    if (options.fetchOptions != null) {
+                        opts = options.fetchOptions;
+                        if (opts.mode) {
+                            request.mode = (opts.mode);
+                        }
+                        if (opts.cache) {
+                            request.cache = (opts.cache);
+                        }
+                        if (opts.credentials) {
+                            request.credentials = (opts.credentials);
+                        }
+                        if (opts.redirect) {
+                            request.redirect = (opts.redirect);
+                        }
+                        if (opts.referrer) {
+                            request.referrer = opts.referrer;
+                        }
+                    }
                     return [4 /*yield*/, fetch(href, request)];
                 case 1:
                     response = _a.sent();
@@ -16751,7 +22493,7 @@ function getUrl(href, options) {
 }
 exports.getUrl = getUrl;
 
-},{"@ethersproject/bytes":33}],110:[function(require,module,exports){
+},{"@ethersproject/bytes":35}],116:[function(require,module,exports){
 "use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -16823,6 +22565,11 @@ function bodyify(value, type) {
     }
     return value;
 }
+function unpercent(value) {
+    return (0, strings_1.toUtf8Bytes)(value.replace(/%([0-9a-f][0-9a-f])/gi, function (all, code) {
+        return String.fromCharCode(parseInt(code, 16));
+    }));
+}
 // This API is still a work in progress; the future changes will likely be:
 // - ConnectionInfo => FetchDataRequest<T = any>
 // - FetchDataRequest.body? = string | Uint8Array | { contentType: string, data: string | Uint8Array }
@@ -16836,6 +22583,7 @@ function _fetchData(connection, body, processFunc) {
     var throttleCallback = ((typeof (connection) === "object") ? connection.throttleCallback : null);
     var throttleSlotInterval = ((typeof (connection) === "object" && typeof (connection.throttleSlotInterval) === "number") ? connection.throttleSlotInterval : 100);
     logger.assertArgument((throttleSlotInterval > 0 && (throttleSlotInterval % 1) === 0), "invalid connection throttle slot interval", "connection.throttleSlotInterval", throttleSlotInterval);
+    var errorPassThrough = ((typeof (connection) === "object") ? !!(connection.errorPassThrough) : false);
     var headers = {};
     var url = null;
     // @TODO: Allow ConnectionInfo to override some of these values
@@ -16874,16 +22622,22 @@ function _fetchData(connection, body, processFunc) {
                 value: "Basic " + (0, base64_1.encode)((0, strings_1.toUtf8Bytes)(authorization))
             };
         }
+        if (connection.skipFetchSetup != null) {
+            options.skipFetchSetup = !!connection.skipFetchSetup;
+        }
+        if (connection.fetchOptions != null) {
+            options.fetchOptions = (0, properties_1.shallowCopy)(connection.fetchOptions);
+        }
     }
-    var reData = new RegExp("^data:([a-z0-9-]+/[a-z0-9-]+);base64,(.*)$", "i");
+    var reData = new RegExp("^data:([^;:]*)?(;base64)?,(.*)$", "i");
     var dataMatch = ((url) ? url.match(reData) : null);
     if (dataMatch) {
         try {
             var response = {
                 statusCode: 200,
                 statusMessage: "OK",
-                headers: { "content-type": dataMatch[1] },
-                body: (0, base64_1.decode)(dataMatch[2])
+                headers: { "content-type": (dataMatch[1] || "text/plain") },
+                body: (dataMatch[2] ? (0, base64_1.decode)(dataMatch[3]) : unpercent(dataMatch[3]))
             };
             var result = response.body;
             if (processFunc) {
@@ -17012,7 +22766,7 @@ function _fetchData(connection, body, processFunc) {
                         if (allow304 && response.statusCode === 304) {
                             body_1 = null;
                         }
-                        else if (response.statusCode < 200 || response.statusCode >= 300) {
+                        else if (!errorPassThrough && (response.statusCode < 200 || response.statusCode >= 300)) {
                             runningTimeout.cancel();
                             logger.throwError("bad response", logger_1.Logger.errors.SERVER_ERROR, {
                                 status: response.statusCode,
@@ -17203,13 +22957,13 @@ function poll(func, options) {
 }
 exports.poll = poll;
 
-},{"./_version":108,"./geturl":109,"@ethersproject/base64":26,"@ethersproject/bytes":33,"@ethersproject/logger":57,"@ethersproject/properties":63,"@ethersproject/strings":100}],111:[function(require,module,exports){
+},{"./_version":114,"./geturl":115,"@ethersproject/base64":27,"@ethersproject/bytes":35,"@ethersproject/logger":62,"@ethersproject/properties":68,"@ethersproject/strings":106}],117:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "wordlists/5.5.0";
+exports.version = "wordlists/5.7.0";
 
-},{}],112:[function(require,module,exports){
+},{}],118:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.wordlists = exports.Wordlist = exports.logger = void 0;
@@ -17221,7 +22975,7 @@ Object.defineProperty(exports, "Wordlist", { enumerable: true, get: function () 
 var wordlists_1 = require("./wordlists");
 Object.defineProperty(exports, "wordlists", { enumerable: true, get: function () { return wordlists_1.wordlists; } });
 
-},{"./wordlist":121,"./wordlists":122}],113:[function(require,module,exports){
+},{"./wordlist":127,"./wordlists":128}],119:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -17274,7 +23028,7 @@ var langCz = new LangCz();
 exports.langCz = langCz;
 wordlist_1.Wordlist.register(langCz);
 
-},{"./wordlist":121}],114:[function(require,module,exports){
+},{"./wordlist":127}],120:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -17327,7 +23081,7 @@ var langEn = new LangEn();
 exports.langEn = langEn;
 wordlist_1.Wordlist.register(langEn);
 
-},{"./wordlist":121}],115:[function(require,module,exports){
+},{"./wordlist":127}],121:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -17411,7 +23165,7 @@ var langEs = new LangEs();
 exports.langEs = langEs;
 wordlist_1.Wordlist.register(langEs);
 
-},{"./wordlist":121,"@ethersproject/strings":100}],116:[function(require,module,exports){
+},{"./wordlist":127,"@ethersproject/strings":106}],122:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -17494,7 +23248,7 @@ var langFr = new LangFr();
 exports.langFr = langFr;
 wordlist_1.Wordlist.register(langFr);
 
-},{"./wordlist":121,"@ethersproject/strings":100}],117:[function(require,module,exports){
+},{"./wordlist":127,"@ethersproject/strings":106}],123:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -17547,7 +23301,7 @@ var langIt = new LangIt();
 exports.langIt = langIt;
 wordlist_1.Wordlist.register(langIt);
 
-},{"./wordlist":121}],118:[function(require,module,exports){
+},{"./wordlist":127}],124:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -17695,7 +23449,7 @@ var langJa = new LangJa();
 exports.langJa = langJa;
 wordlist_1.Wordlist.register(langJa);
 
-},{"./wordlist":121,"@ethersproject/bytes":33,"@ethersproject/strings":100}],119:[function(require,module,exports){
+},{"./wordlist":127,"@ethersproject/bytes":35,"@ethersproject/strings":106}],125:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -17779,7 +23533,7 @@ var langKo = new LangKo();
 exports.langKo = langKo;
 wordlist_1.Wordlist.register(langKo);
 
-},{"./wordlist":121,"@ethersproject/strings":100}],120:[function(require,module,exports){
+},{"./wordlist":127,"@ethersproject/strings":106}],126:[function(require,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = function (d, b) {
@@ -17868,7 +23622,7 @@ var langZhTw = new LangZh("tw");
 exports.langZhTw = langZhTw;
 wordlist_1.Wordlist.register(langZhTw);
 
-},{"./wordlist":121,"@ethersproject/strings":100}],121:[function(require,module,exports){
+},{"./wordlist":127,"@ethersproject/strings":106}],127:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Wordlist = exports.logger = void 0;
@@ -17926,7 +23680,7 @@ var Wordlist = /** @class */ (function () {
 }());
 exports.Wordlist = Wordlist;
 
-},{"./_version":111,"@ethersproject/hash":43,"@ethersproject/logger":57,"@ethersproject/properties":63}],122:[function(require,module,exports){
+},{"./_version":117,"@ethersproject/hash":48,"@ethersproject/logger":62,"@ethersproject/properties":68}],128:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.wordlists = void 0;
@@ -17951,7 +23705,7 @@ exports.wordlists = {
     zh_tw: lang_zh_1.langZhTw
 };
 
-},{"./lang-cz":113,"./lang-en":114,"./lang-es":115,"./lang-fr":116,"./lang-it":117,"./lang-ja":118,"./lang-ko":119,"./lang-zh":120}],123:[function(require,module,exports){
+},{"./lang-cz":119,"./lang-en":120,"./lang-es":121,"./lang-fr":122,"./lang-it":123,"./lang-ja":124,"./lang-ko":125,"./lang-zh":126}],129:[function(require,module,exports){
 "use strict";
 
 (function(root) {
@@ -18751,7 +24505,7 @@ exports.wordlists = {
 
 })(this);
 
-},{}],124:[function(require,module,exports){
+},{}],130:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -18903,7 +24657,7 @@ function fromByteArray (uint8) {
   return parts.join('')
 }
 
-},{}],125:[function(require,module,exports){
+},{}],131:[function(require,module,exports){
 'use strict'
 var ALPHABET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
 
@@ -19087,7 +24841,7 @@ module.exports = {
   fromWords: fromWords
 }
 
-},{}],126:[function(require,module,exports){
+},{}],132:[function(require,module,exports){
 (function (module, exports) {
   'use strict';
 
@@ -22535,7 +28289,7 @@ module.exports = {
   };
 })(typeof module === 'undefined' || module, this);
 
-},{"buffer":128}],127:[function(require,module,exports){
+},{"buffer":134}],133:[function(require,module,exports){
 var r;
 
 module.exports = function rand(len) {
@@ -22602,11 +28356,11 @@ if (typeof self === 'object') {
   }
 }
 
-},{"crypto":128}],128:[function(require,module,exports){
+},{"crypto":134}],134:[function(require,module,exports){
 
-},{}],129:[function(require,module,exports){
-arguments[4][128][0].apply(exports,arguments)
-},{"dup":128}],130:[function(require,module,exports){
+},{}],135:[function(require,module,exports){
+arguments[4][134][0].apply(exports,arguments)
+},{"dup":134}],136:[function(require,module,exports){
 (function (Buffer){(function (){
 /*!
  * The buffer module from node.js, for the browser.
@@ -24387,7 +30141,7 @@ function numberIsNaN (obj) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"base64-js":124,"buffer":130,"ieee754":165}],131:[function(require,module,exports){
+},{"base64-js":130,"buffer":136,"ieee754":171}],137:[function(require,module,exports){
 (function (Buffer){(function (){
 /*!
  * The buffer module from node.js, for the browser.
@@ -26208,7 +31962,7 @@ var hexSliceLookupTable = (function () {
 })()
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"base64-js":124,"buffer":130,"ieee754":165}],132:[function(require,module,exports){
+},{"base64-js":130,"buffer":136,"ieee754":171}],138:[function(require,module,exports){
 'use strict';
 
 var elliptic = exports;
@@ -26223,7 +31977,7 @@ elliptic.curves = require('./elliptic/curves');
 elliptic.ec = require('./elliptic/ec');
 elliptic.eddsa = require('./elliptic/eddsa');
 
-},{"../package.json":147,"./elliptic/curve":135,"./elliptic/curves":138,"./elliptic/ec":139,"./elliptic/eddsa":142,"./elliptic/utils":146,"brorand":127}],133:[function(require,module,exports){
+},{"../package.json":153,"./elliptic/curve":141,"./elliptic/curves":144,"./elliptic/ec":145,"./elliptic/eddsa":148,"./elliptic/utils":152,"brorand":133}],139:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -26606,7 +32360,7 @@ BasePoint.prototype.dblp = function dblp(k) {
   return r;
 };
 
-},{"../utils":146,"bn.js":126}],134:[function(require,module,exports){
+},{"../utils":152,"bn.js":132}],140:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -27043,7 +32797,7 @@ Point.prototype.eqXToP = function eqXToP(x) {
 Point.prototype.toP = Point.prototype.normalize;
 Point.prototype.mixedAdd = Point.prototype.add;
 
-},{"../utils":146,"./base":133,"bn.js":126,"inherits":166}],135:[function(require,module,exports){
+},{"../utils":152,"./base":139,"bn.js":132,"inherits":172}],141:[function(require,module,exports){
 'use strict';
 
 var curve = exports;
@@ -27053,7 +32807,7 @@ curve.short = require('./short');
 curve.mont = require('./mont');
 curve.edwards = require('./edwards');
 
-},{"./base":133,"./edwards":134,"./mont":136,"./short":137}],136:[function(require,module,exports){
+},{"./base":139,"./edwards":140,"./mont":142,"./short":143}],142:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -27233,7 +32987,7 @@ Point.prototype.getX = function getX() {
   return this.x.fromRed();
 };
 
-},{"../utils":146,"./base":133,"bn.js":126,"inherits":166}],137:[function(require,module,exports){
+},{"../utils":152,"./base":139,"bn.js":132,"inherits":172}],143:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -28173,7 +33927,7 @@ JPoint.prototype.isInfinity = function isInfinity() {
   return this.z.cmpn(0) === 0;
 };
 
-},{"../utils":146,"./base":133,"bn.js":126,"inherits":166}],138:[function(require,module,exports){
+},{"../utils":152,"./base":139,"bn.js":132,"inherits":172}],144:[function(require,module,exports){
 'use strict';
 
 var curves = exports;
@@ -28381,7 +34135,7 @@ defineCurve('secp256k1', {
   ],
 });
 
-},{"./curve":135,"./precomputed/secp256k1":145,"./utils":146,"hash.js":152}],139:[function(require,module,exports){
+},{"./curve":141,"./precomputed/secp256k1":151,"./utils":152,"hash.js":158}],145:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -28626,7 +34380,7 @@ EC.prototype.getKeyRecoveryParam = function(e, signature, Q, enc) {
   throw new Error('Unable to find valid recovery factor');
 };
 
-},{"../curves":138,"../utils":146,"./key":140,"./signature":141,"bn.js":126,"brorand":127,"hmac-drbg":164}],140:[function(require,module,exports){
+},{"../curves":144,"../utils":152,"./key":146,"./signature":147,"bn.js":132,"brorand":133,"hmac-drbg":170}],146:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -28749,7 +34503,7 @@ KeyPair.prototype.inspect = function inspect() {
          ' pub: ' + (this.pub && this.pub.inspect()) + ' >';
 };
 
-},{"../utils":146,"bn.js":126}],141:[function(require,module,exports){
+},{"../utils":152,"bn.js":132}],147:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -28917,7 +34671,7 @@ Signature.prototype.toDER = function toDER(enc) {
   return utils.encode(res, enc);
 };
 
-},{"../utils":146,"bn.js":126}],142:[function(require,module,exports){
+},{"../utils":152,"bn.js":132}],148:[function(require,module,exports){
 'use strict';
 
 var hash = require('hash.js');
@@ -29037,7 +34791,7 @@ EDDSA.prototype.isPoint = function isPoint(val) {
   return val instanceof this.pointClass;
 };
 
-},{"../curves":138,"../utils":146,"./key":143,"./signature":144,"hash.js":152}],143:[function(require,module,exports){
+},{"../curves":144,"../utils":152,"./key":149,"./signature":150,"hash.js":158}],149:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -29134,7 +34888,7 @@ KeyPair.prototype.getPublic = function getPublic(enc) {
 
 module.exports = KeyPair;
 
-},{"../utils":146}],144:[function(require,module,exports){
+},{"../utils":152}],150:[function(require,module,exports){
 'use strict';
 
 var BN = require('bn.js');
@@ -29201,7 +34955,7 @@ Signature.prototype.toHex = function toHex() {
 
 module.exports = Signature;
 
-},{"../utils":146,"bn.js":126}],145:[function(require,module,exports){
+},{"../utils":152,"bn.js":132}],151:[function(require,module,exports){
 module.exports = {
   doubles: {
     step: 4,
@@ -29983,7 +35737,7 @@ module.exports = {
   },
 };
 
-},{}],146:[function(require,module,exports){
+},{}],152:[function(require,module,exports){
 'use strict';
 
 var utils = exports;
@@ -30104,52 +35858,38 @@ function intFromLE(bytes) {
 utils.intFromLE = intFromLE;
 
 
-},{"bn.js":126,"minimalistic-assert":169,"minimalistic-crypto-utils":170}],147:[function(require,module,exports){
+},{"bn.js":132,"minimalistic-assert":175,"minimalistic-crypto-utils":176}],153:[function(require,module,exports){
 module.exports={
-  "_from": "elliptic@6.5.4",
-  "_id": "elliptic@6.5.4",
-  "_inBundle": false,
-  "_integrity": "sha512-iLhC6ULemrljPZb+QutR5TQGB+pdW6KGD5RSegS+8sorOZT+rdQFbsQFJgvN3eRqNALqJer4oQ16YvJHlU8hzQ==",
-  "_location": "/elliptic",
-  "_phantomChildren": {},
-  "_requested": {
-    "type": "version",
-    "registry": true,
-    "raw": "elliptic@6.5.4",
-    "name": "elliptic",
-    "escapedName": "elliptic",
-    "rawSpec": "6.5.4",
-    "saveSpec": null,
-    "fetchSpec": "6.5.4"
-  },
-  "_requiredBy": [
-    "/@ethersproject/signing-key",
-    "/browserify-sign",
-    "/create-ecdh"
+  "name": "elliptic",
+  "version": "6.5.4",
+  "description": "EC cryptography",
+  "main": "lib/elliptic.js",
+  "files": [
+    "lib"
   ],
-  "_resolved": "https://registry.npmjs.org/elliptic/-/elliptic-6.5.4.tgz",
-  "_shasum": "da37cebd31e79a1367e941b592ed1fbebd58abbb",
-  "_spec": "elliptic@6.5.4",
-  "_where": "/home/mota/Sandbox/ethereum-input-data-decoder/node_modules/@ethersproject/signing-key",
-  "author": {
-    "name": "Fedor Indutny",
-    "email": "fedor@indutny.com"
+  "scripts": {
+    "lint": "eslint lib test",
+    "lint:fix": "npm run lint -- --fix",
+    "unit": "istanbul test _mocha --reporter=spec test/index.js",
+    "test": "npm run lint && npm run unit",
+    "version": "grunt dist && git add dist/"
   },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:indutny/elliptic"
+  },
+  "keywords": [
+    "EC",
+    "Elliptic",
+    "curve",
+    "Cryptography"
+  ],
+  "author": "Fedor Indutny <fedor@indutny.com>",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/indutny/elliptic/issues"
   },
-  "bundleDependencies": false,
-  "dependencies": {
-    "bn.js": "^4.11.9",
-    "brorand": "^1.1.0",
-    "hash.js": "^1.0.0",
-    "hmac-drbg": "^1.0.1",
-    "inherits": "^2.0.4",
-    "minimalistic-assert": "^1.0.1",
-    "minimalistic-crypto-utils": "^1.0.1"
-  },
-  "deprecated": false,
-  "description": "EC cryptography",
+  "homepage": "https://github.com/indutny/elliptic",
   "devDependencies": {
     "brfs": "^2.0.2",
     "coveralls": "^3.1.0",
@@ -30165,40 +35905,24 @@ module.exports={
     "istanbul": "^0.4.5",
     "mocha": "^8.0.1"
   },
-  "files": [
-    "lib"
-  ],
-  "homepage": "https://github.com/indutny/elliptic",
-  "keywords": [
-    "EC",
-    "Elliptic",
-    "curve",
-    "Cryptography"
-  ],
-  "license": "MIT",
-  "main": "lib/elliptic.js",
-  "name": "elliptic",
-  "repository": {
-    "type": "git",
-    "url": "git+ssh://git@github.com/indutny/elliptic.git"
-  },
-  "scripts": {
-    "lint": "eslint lib test",
-    "lint:fix": "npm run lint -- --fix",
-    "test": "npm run lint && npm run unit",
-    "unit": "istanbul test _mocha --reporter=spec test/index.js",
-    "version": "grunt dist && git add dist/"
-  },
-  "version": "6.5.4"
+  "dependencies": {
+    "bn.js": "^4.11.9",
+    "brorand": "^1.1.0",
+    "hash.js": "^1.0.0",
+    "hmac-drbg": "^1.0.1",
+    "inherits": "^2.0.4",
+    "minimalistic-assert": "^1.0.1",
+    "minimalistic-crypto-utils": "^1.0.1"
+  }
 }
 
-},{}],148:[function(require,module,exports){
+},{}],154:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.version = void 0;
-exports.version = "ethers/5.5.4";
+exports.version = "ethers/5.7.2";
 
-},{}],149:[function(require,module,exports){
+},{}],155:[function(require,module,exports){
 "use strict";
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -30254,7 +35978,7 @@ Object.defineProperty(exports, "version", { enumerable: true, get: function () {
 var logger = new logger_1.Logger(_version_1.version);
 exports.logger = logger;
 
-},{"./_version":148,"./utils":151,"@ethersproject/abstract-signer":22,"@ethersproject/bignumber":31,"@ethersproject/constants":37,"@ethersproject/contracts":40,"@ethersproject/logger":57,"@ethersproject/providers":73,"@ethersproject/wallet":107,"@ethersproject/wordlists":112}],150:[function(require,module,exports){
+},{"./_version":154,"./utils":157,"@ethersproject/abstract-signer":23,"@ethersproject/bignumber":32,"@ethersproject/constants":39,"@ethersproject/contracts":42,"@ethersproject/logger":62,"@ethersproject/providers":79,"@ethersproject/wallet":113,"@ethersproject/wordlists":118}],156:[function(require,module,exports){
 "use strict";
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -30308,7 +36032,7 @@ Object.defineProperty(exports, "wordlists", { enumerable: true, get: function ()
 Object.defineProperty(exports, "version", { enumerable: true, get: function () { return ethers_1.version; } });
 Object.defineProperty(exports, "Wordlist", { enumerable: true, get: function () { return ethers_1.Wordlist; } });
 
-},{"./ethers":149}],151:[function(require,module,exports){
+},{"./ethers":155}],157:[function(require,module,exports){
 "use strict";
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -30331,7 +36055,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.formatBytes32String = exports.Utf8ErrorFuncs = exports.toUtf8String = exports.toUtf8CodePoints = exports.toUtf8Bytes = exports._toEscapedUtf8String = exports.nameprep = exports.hexDataSlice = exports.hexDataLength = exports.hexZeroPad = exports.hexValue = exports.hexStripZeros = exports.hexConcat = exports.isHexString = exports.hexlify = exports.base64 = exports.base58 = exports.TransactionDescription = exports.LogDescription = exports.Interface = exports.SigningKey = exports.HDNode = exports.defaultPath = exports.isBytesLike = exports.isBytes = exports.zeroPad = exports.stripZeros = exports.concat = exports.arrayify = exports.shallowCopy = exports.resolveProperties = exports.getStatic = exports.defineReadOnly = exports.deepCopy = exports.checkProperties = exports.poll = exports.fetchJson = exports._fetchData = exports.RLP = exports.Logger = exports.checkResultErrors = exports.FormatTypes = exports.ParamType = exports.FunctionFragment = exports.EventFragment = exports.ErrorFragment = exports.ConstructorFragment = exports.Fragment = exports.defaultAbiCoder = exports.AbiCoder = void 0;
-exports.Indexed = exports.Utf8ErrorReason = exports.UnicodeNormalizationForm = exports.SupportedAlgorithm = exports.mnemonicToSeed = exports.isValidMnemonic = exports.entropyToMnemonic = exports.mnemonicToEntropy = exports.getAccountPath = exports.verifyTypedData = exports.verifyMessage = exports.recoverPublicKey = exports.computePublicKey = exports.recoverAddress = exports.computeAddress = exports.getJsonWalletAddress = exports.TransactionTypes = exports.serializeTransaction = exports.parseTransaction = exports.accessListify = exports.joinSignature = exports.splitSignature = exports.soliditySha256 = exports.solidityKeccak256 = exports.solidityPack = exports.shuffled = exports.randomBytes = exports.sha512 = exports.sha256 = exports.ripemd160 = exports.keccak256 = exports.computeHmac = exports.commify = exports.parseUnits = exports.formatUnits = exports.parseEther = exports.formatEther = exports.isAddress = exports.getCreate2Address = exports.getContractAddress = exports.getIcapAddress = exports.getAddress = exports._TypedDataEncoder = exports.id = exports.isValidName = exports.namehash = exports.hashMessage = exports.parseBytes32String = void 0;
+exports.Indexed = exports.Utf8ErrorReason = exports.UnicodeNormalizationForm = exports.SupportedAlgorithm = exports.mnemonicToSeed = exports.isValidMnemonic = exports.entropyToMnemonic = exports.mnemonicToEntropy = exports.getAccountPath = exports.verifyTypedData = exports.verifyMessage = exports.recoverPublicKey = exports.computePublicKey = exports.recoverAddress = exports.computeAddress = exports.getJsonWalletAddress = exports.TransactionTypes = exports.serializeTransaction = exports.parseTransaction = exports.accessListify = exports.joinSignature = exports.splitSignature = exports.soliditySha256 = exports.solidityKeccak256 = exports.solidityPack = exports.shuffled = exports.randomBytes = exports.sha512 = exports.sha256 = exports.ripemd160 = exports.keccak256 = exports.computeHmac = exports.commify = exports.parseUnits = exports.formatUnits = exports.parseEther = exports.formatEther = exports.isAddress = exports.getCreate2Address = exports.getContractAddress = exports.getIcapAddress = exports.getAddress = exports._TypedDataEncoder = exports.id = exports.isValidName = exports.namehash = exports.hashMessage = exports.dnsEncode = exports.parseBytes32String = void 0;
 var abi_1 = require("@ethersproject/abi");
 Object.defineProperty(exports, "AbiCoder", { enumerable: true, get: function () { return abi_1.AbiCoder; } });
 Object.defineProperty(exports, "checkResultErrors", { enumerable: true, get: function () { return abi_1.checkResultErrors; } });
@@ -30376,6 +36100,7 @@ Object.defineProperty(exports, "splitSignature", { enumerable: true, get: functi
 Object.defineProperty(exports, "stripZeros", { enumerable: true, get: function () { return bytes_1.stripZeros; } });
 var hash_1 = require("@ethersproject/hash");
 Object.defineProperty(exports, "_TypedDataEncoder", { enumerable: true, get: function () { return hash_1._TypedDataEncoder; } });
+Object.defineProperty(exports, "dnsEncode", { enumerable: true, get: function () { return hash_1.dnsEncode; } });
 Object.defineProperty(exports, "hashMessage", { enumerable: true, get: function () { return hash_1.hashMessage; } });
 Object.defineProperty(exports, "id", { enumerable: true, get: function () { return hash_1.id; } });
 Object.defineProperty(exports, "isValidName", { enumerable: true, get: function () { return hash_1.isValidName; } });
@@ -30456,7 +36181,7 @@ var strings_2 = require("@ethersproject/strings");
 Object.defineProperty(exports, "UnicodeNormalizationForm", { enumerable: true, get: function () { return strings_2.UnicodeNormalizationForm; } });
 Object.defineProperty(exports, "Utf8ErrorReason", { enumerable: true, get: function () { return strings_2.Utf8ErrorReason; } });
 
-},{"@ethersproject/abi":17,"@ethersproject/address":24,"@ethersproject/base64":26,"@ethersproject/basex":27,"@ethersproject/bytes":33,"@ethersproject/hash":43,"@ethersproject/hdnode":48,"@ethersproject/json-wallets":51,"@ethersproject/keccak256":55,"@ethersproject/logger":57,"@ethersproject/properties":63,"@ethersproject/random":84,"@ethersproject/rlp":87,"@ethersproject/sha2":90,"@ethersproject/signing-key":94,"@ethersproject/solidity":96,"@ethersproject/strings":100,"@ethersproject/transactions":103,"@ethersproject/units":105,"@ethersproject/wallet":107,"@ethersproject/web":110}],152:[function(require,module,exports){
+},{"@ethersproject/abi":18,"@ethersproject/address":25,"@ethersproject/base64":27,"@ethersproject/basex":28,"@ethersproject/bytes":35,"@ethersproject/hash":48,"@ethersproject/hdnode":53,"@ethersproject/json-wallets":56,"@ethersproject/keccak256":60,"@ethersproject/logger":62,"@ethersproject/properties":68,"@ethersproject/random":90,"@ethersproject/rlp":93,"@ethersproject/sha2":96,"@ethersproject/signing-key":100,"@ethersproject/solidity":102,"@ethersproject/strings":106,"@ethersproject/transactions":109,"@ethersproject/units":111,"@ethersproject/wallet":113,"@ethersproject/web":116}],158:[function(require,module,exports){
 var hash = exports;
 
 hash.utils = require('./hash/utils');
@@ -30473,7 +36198,7 @@ hash.sha384 = hash.sha.sha384;
 hash.sha512 = hash.sha.sha512;
 hash.ripemd160 = hash.ripemd.ripemd160;
 
-},{"./hash/common":153,"./hash/hmac":154,"./hash/ripemd":155,"./hash/sha":156,"./hash/utils":163}],153:[function(require,module,exports){
+},{"./hash/common":159,"./hash/hmac":160,"./hash/ripemd":161,"./hash/sha":162,"./hash/utils":169}],159:[function(require,module,exports){
 'use strict';
 
 var utils = require('./utils');
@@ -30567,7 +36292,7 @@ BlockHash.prototype._pad = function pad() {
   return res;
 };
 
-},{"./utils":163,"minimalistic-assert":169}],154:[function(require,module,exports){
+},{"./utils":169,"minimalistic-assert":175}],160:[function(require,module,exports){
 'use strict';
 
 var utils = require('./utils');
@@ -30616,7 +36341,7 @@ Hmac.prototype.digest = function digest(enc) {
   return this.outer.digest(enc);
 };
 
-},{"./utils":163,"minimalistic-assert":169}],155:[function(require,module,exports){
+},{"./utils":169,"minimalistic-assert":175}],161:[function(require,module,exports){
 'use strict';
 
 var utils = require('./utils');
@@ -30764,7 +36489,7 @@ var sh = [
   8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
 ];
 
-},{"./common":153,"./utils":163}],156:[function(require,module,exports){
+},{"./common":159,"./utils":169}],162:[function(require,module,exports){
 'use strict';
 
 exports.sha1 = require('./sha/1');
@@ -30773,7 +36498,7 @@ exports.sha256 = require('./sha/256');
 exports.sha384 = require('./sha/384');
 exports.sha512 = require('./sha/512');
 
-},{"./sha/1":157,"./sha/224":158,"./sha/256":159,"./sha/384":160,"./sha/512":161}],157:[function(require,module,exports){
+},{"./sha/1":163,"./sha/224":164,"./sha/256":165,"./sha/384":166,"./sha/512":167}],163:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -30849,7 +36574,7 @@ SHA1.prototype._digest = function digest(enc) {
     return utils.split32(this.h, 'big');
 };
 
-},{"../common":153,"../utils":163,"./common":162}],158:[function(require,module,exports){
+},{"../common":159,"../utils":169,"./common":168}],164:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -30881,7 +36606,7 @@ SHA224.prototype._digest = function digest(enc) {
 };
 
 
-},{"../utils":163,"./256":159}],159:[function(require,module,exports){
+},{"../utils":169,"./256":165}],165:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -30988,7 +36713,7 @@ SHA256.prototype._digest = function digest(enc) {
     return utils.split32(this.h, 'big');
 };
 
-},{"../common":153,"../utils":163,"./common":162,"minimalistic-assert":169}],160:[function(require,module,exports){
+},{"../common":159,"../utils":169,"./common":168,"minimalistic-assert":175}],166:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -31025,7 +36750,7 @@ SHA384.prototype._digest = function digest(enc) {
     return utils.split32(this.h.slice(0, 12), 'big');
 };
 
-},{"../utils":163,"./512":161}],161:[function(require,module,exports){
+},{"../utils":169,"./512":167}],167:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -31357,7 +37082,7 @@ function g1_512_lo(xh, xl) {
   return r;
 }
 
-},{"../common":153,"../utils":163,"minimalistic-assert":169}],162:[function(require,module,exports){
+},{"../common":159,"../utils":169,"minimalistic-assert":175}],168:[function(require,module,exports){
 'use strict';
 
 var utils = require('../utils');
@@ -31408,7 +37133,7 @@ function g1_256(x) {
 }
 exports.g1_256 = g1_256;
 
-},{"../utils":163}],163:[function(require,module,exports){
+},{"../utils":169}],169:[function(require,module,exports){
 'use strict';
 
 var assert = require('minimalistic-assert');
@@ -31688,7 +37413,7 @@ function shr64_lo(ah, al, num) {
 }
 exports.shr64_lo = shr64_lo;
 
-},{"inherits":166,"minimalistic-assert":169}],164:[function(require,module,exports){
+},{"inherits":172,"minimalistic-assert":175}],170:[function(require,module,exports){
 'use strict';
 
 var hash = require('hash.js');
@@ -31803,7 +37528,7 @@ HmacDRBG.prototype.generate = function generate(len, enc, add, addEnc) {
   return utils.encode(res, enc);
 };
 
-},{"hash.js":152,"minimalistic-assert":169,"minimalistic-crypto-utils":170}],165:[function(require,module,exports){
+},{"hash.js":158,"minimalistic-assert":175,"minimalistic-crypto-utils":176}],171:[function(require,module,exports){
 /*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
@@ -31890,7 +37615,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],166:[function(require,module,exports){
+},{}],172:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -31919,7 +37644,7 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],167:[function(require,module,exports){
+},{}],173:[function(require,module,exports){
 /*!
  * Determine if an object is a Buffer
  *
@@ -31932,7 +37657,7 @@ module.exports = function isBuffer (obj) {
     typeof obj.constructor.isBuffer === 'function' && obj.constructor.isBuffer(obj)
 }
 
-},{}],168:[function(require,module,exports){
+},{}],174:[function(require,module,exports){
 (function (process,global){(function (){
 /**
  * [js-sha3]{@link https://github.com/emn178/js-sha3}
@@ -32592,7 +38317,7 @@ module.exports = function isBuffer (obj) {
 })();
 
 }).call(this)}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"_process":171}],169:[function(require,module,exports){
+},{"_process":177}],175:[function(require,module,exports){
 module.exports = assert;
 
 function assert(val, msg) {
@@ -32605,7 +38330,7 @@ assert.equal = function assertEqual(l, r, msg) {
     throw new Error(msg || ('Assertion failed: ' + l + ' != ' + r));
 };
 
-},{}],170:[function(require,module,exports){
+},{}],176:[function(require,module,exports){
 'use strict';
 
 var utils = exports;
@@ -32665,7 +38390,7 @@ utils.encode = function encode(arr, enc) {
     return arr;
 };
 
-},{}],171:[function(require,module,exports){
+},{}],177:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -32851,7 +38576,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],172:[function(require,module,exports){
+},{}],178:[function(require,module,exports){
 (function (setImmediate){(function (){
 "use strict";
 
@@ -33343,7 +39068,7 @@ process.umask = function() { return 0; };
 })(this);
 
 }).call(this)}).call(this,require("timers").setImmediate)
-},{"timers":173}],173:[function(require,module,exports){
+},{"timers":179}],179:[function(require,module,exports){
 (function (setImmediate,clearImmediate){(function (){
 var nextTick = require('process/browser.js').nextTick;
 var apply = Function.prototype.apply;
@@ -33422,4 +39147,4 @@ exports.clearImmediate = typeof clearImmediate === "function" ? clearImmediate :
   delete immediateIds[id];
 };
 }).call(this)}).call(this,require("timers").setImmediate,require("timers").clearImmediate)
-},{"process/browser.js":171,"timers":173}]},{},[1]);
+},{"process/browser.js":177,"timers":179}]},{},[2]);
