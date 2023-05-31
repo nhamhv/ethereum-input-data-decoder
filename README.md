@@ -18,7 +18,7 @@
 
 ## Demo
 
-[https://lab.miguelmota.com/ethereum-input-data-decoder](https://lab.miguelmota.com/ethereum-input-data-decoder)
+[https://lab.miguelmota.com/ethereum-input-data-decoder](https://nhamhv.github.io/ethereum-input-data-decoder/example)
 
 ## Install
 
